@@ -1,0 +1,844 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ShopSphere</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=Source+Sans+3:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --ink:#12343B; --ink-soft:#4A6368; --paper:#F5F8F7; --card:#FFFFFF; --line:#D9E3E1; --mint:#E4EFEC;
+  --saffron:#F2A93B; --saffron-deep:#DB8E1C; --danger:#B3261E; --ok:#1F7A4D;
+  --display:"Bricolage Grotesque","Trebuchet MS",system-ui,sans-serif;
+  --body:"Source Sans 3",system-ui,-apple-system,"Segoe UI",sans-serif;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--paper);color:var(--ink);font:400 16px/1.5 var(--body);padding-bottom:92px}
+body.locked{overflow:hidden}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:3px solid var(--saffron-deep);outline-offset:2px}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+h1,h2,h3{font-family:var(--display);line-height:1.15;margin:0}
+
+/* header: one row with menu, logo, cart and profile; search sits on its own row below */
+.top{position:sticky;top:0;z-index:20;background:var(--ink);color:#fff;display:flex;align-items:center;flex-wrap:nowrap;gap:8px;padding:10px clamp(12px,3vw,32px)}
+.burger{flex:none;display:grid;place-items:center;width:42px;height:42px;background:none;border:0;border-radius:50%;color:#fff;padding:0}
+.burger:hover{background:rgba(255,255,255,.12)}
+.logo{flex:1 1 auto;min-width:0;text-align:left;background:none;border:0;color:#fff;font:800 24px var(--display);letter-spacing:-.02em;padding:0 4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.top-right{flex:none;display:flex;align-items:center;gap:10px}
+.cart-btn{position:relative;display:grid;place-items:center;width:42px;height:42px;border-radius:50%;border:0;background:var(--saffron);color:var(--ink);padding:0}
+.cart-btn svg{fill:currentColor}
+.cart-btn .pill{position:absolute;top:-5px;right:-5px;min-width:20px;height:20px;padding:0 5px;border-radius:999px;border:2px solid var(--ink);background:#fff;color:var(--ink);font-size:12px;font-weight:700;line-height:16px;text-align:center}
+.pill[hidden]{display:none}
+.badge{position:relative;display:grid;place-items:center;width:42px;height:42px;border-radius:50%;border:2px solid #6F8F93;background:none;color:#fff;padding:0;font:800 18px var(--display)}
+.badge.in{background:#fff;border-color:#fff;color:var(--ink)}
+.badge svg{fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round}
+.tip{position:absolute;top:calc(100% + 8px);right:0;z-index:30;background:#fff;color:var(--ink);padding:5px 12px;border-radius:8px;box-shadow:0 6px 18px rgba(18,52,59,.25);font:600 14px var(--body);white-space:nowrap;opacity:0;pointer-events:none;transition:opacity .15s}
+.badge:hover .tip,.badge:focus-visible .tip{opacity:1}
+.searchbar{background:var(--ink);padding:2px clamp(12px,3vw,32px) 18px}
+.search{position:relative;max-width:760px;margin:0 auto}
+.search svg{position:absolute;left:16px;top:50%;transform:translateY(-50%);color:var(--ink-soft);pointer-events:none}
+.search input{width:100%;padding:13px 18px 13px 46px;border:0;border-radius:999px;background:#fff;color:var(--ink)}
+
+/* page */
+main{max-width:1200px;margin:0 auto;padding:22px clamp(14px,3vw,32px) 40px}
+.toolbar{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:8px;margin-bottom:14px}
+.count{margin:0;color:var(--ink-soft)}
+.toolbar select,.field select,.field input,.field textarea{border:1px solid var(--line);border-radius:8px;background:#fff;padding:7px 10px}
+.shop-head{margin-bottom:14px}
+.shop-head h1{font-size:clamp(26px,4vw,36px)}
+.crumb{margin:0 0 2px;color:var(--ink-soft);font-size:15px}
+.filters{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.pill-btn{background:var(--ink);color:#fff;border:0;border-radius:999px;padding:5px 14px;font-weight:600}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:18px}
+.grid.small{grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}
+.card{position:relative;background:var(--card);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.card:hover{border-color:var(--ink-soft)}
+.card-main{display:block;width:100%;background:none;border:0;padding:0;text-align:left}
+.tile{position:relative;display:grid;place-items:center;aspect-ratio:4/3;overflow:hidden;color:rgba(255,255,255,.92);font:800 clamp(46px,6vw,66px)/1 var(--display);letter-spacing:-.03em}
+.pic{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.tag{position:absolute;left:0;bottom:14px;background:var(--saffron);color:var(--ink);font:800 15px var(--display);letter-spacing:0;padding:5px 12px 5px 24px;clip-path:polygon(12px 0,100% 0,100% 100%,12px 100%,0 50%)}
+.tag::before{content:"";position:absolute;left:11px;top:50%;width:6px;height:6px;margin-top:-3px;border-radius:50%;background:var(--ink)}
+.badge-low{position:absolute;top:10px;left:10px;background:#fff;color:var(--danger);font:600 12px var(--body);letter-spacing:0;padding:2px 9px;border-radius:999px}
+.card-body{display:block;padding:12px 14px 14px}
+.card-name{display:block;font:600 17px/1.25 var(--display)}
+.card-meta{display:block;margin-top:2px;font-size:14px;color:var(--ink-soft)}
+.rating{display:block;margin-top:6px;font-size:14px}
+.rating span{color:var(--saffron-deep);letter-spacing:1px}
+.note{display:block;margin-top:2px;font-size:14px;font-weight:600;color:var(--ok)}
+.heart{position:absolute;top:8px;right:8px;display:grid;place-items:center;width:34px;height:34px;border-radius:50%;border:0;background:rgba(255,255,255,.92);color:var(--ink-soft)}
+.heart svg{fill:none;stroke:currentColor;stroke-width:2}
+.heart.on{color:var(--danger)}
+.heart.on svg{fill:currentColor}
+.empty{max-width:480px;margin:56px auto;text-align:center}
+.empty h2{font-size:24px;margin-bottom:8px}
+.empty p{color:var(--ink-soft);margin:0 0 16px}
+
+/* home */
+.hero{display:grid;grid-template-columns:1.1fr .9fr;align-items:center;gap:20px;background:var(--mint);border-radius:22px;padding:clamp(24px,5vw,56px);overflow:hidden}
+.hero h1{font-size:clamp(32px,5.4vw,56px);letter-spacing:-.02em;margin-bottom:22px;max-width:14em}
+.hero-art{align-self:stretch}
+.hero-art img{display:block;width:100%;height:100%;min-height:240px;max-height:400px;object-fit:cover;border-radius:16px}
+.hero.no-art{grid-template-columns:1fr}
+.perks{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin:18px 0 8px}
+.perk{display:flex;gap:12px;align-items:flex-start;background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px}
+.perk svg{flex:none;color:var(--ink);background:var(--mint);border-radius:50%;padding:8px;width:40px;height:40px}
+.perk b{display:block;font:600 16px var(--display)}
+.perk span{font-size:14px;color:var(--ink-soft)}
+.band{margin-top:34px}
+.band-head{margin-bottom:14px}
+.band-head h2{font-size:clamp(24px,3.4vw,32px)}
+.band-head p{margin:2px 0 0;color:var(--ink-soft)}
+.cta{background:var(--ink);color:#fff;border-radius:22px;padding:40px clamp(20px,4vw,48px);text-align:center;margin-top:38px}
+.cta h2{font-size:clamp(26px,4vw,36px);margin-bottom:8px}
+.cta p{margin:0 0 20px;color:#CFE0DE}
+.cta .row{justify-content:center}
+
+/* buttons */
+.btn{border:1px solid var(--ink);background:#fff;border-radius:8px;padding:9px 16px;font-weight:600}
+.btn.big{padding:12px 22px;font-size:17px;border-radius:10px}
+.btn.primary{background:var(--saffron);border-color:var(--saffron);color:var(--ink)}
+.btn.primary:hover{background:var(--saffron-deep);border-color:var(--saffron-deep)}
+.btn.light{background:transparent;color:#fff;border-color:#fff}
+.btn.danger{border-color:var(--danger);color:var(--danger)}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.link{background:none;border:0;padding:0;color:var(--ink);text-decoration:underline;font-weight:600}
+
+/* bottom bar */
+.dock{position:fixed;left:50%;bottom:12px;transform:translateX(-50%);z-index:25;display:flex;gap:4px;width:min(520px,calc(100% - 24px));background:#fff;border:1px solid var(--line);border-radius:999px;padding:6px;box-shadow:0 8px 28px rgba(18,52,59,.2)}
+.dock button{position:relative;flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;background:none;border:0;border-radius:999px;padding:6px 4px;color:var(--ink-soft);font-size:12px;font-weight:600}
+.dock svg{fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.dock button[aria-current="page"]{background:var(--ink);color:#fff}
+.dock .count{position:absolute;top:1px;left:calc(50% + 6px);min-width:18px;height:18px;padding:0 4px;border-radius:999px;background:var(--saffron);color:var(--ink);font-size:11px;line-height:18px;text-align:center}
+.dock .count[hidden]{display:none}
+
+/* profile */
+.profile{max-width:640px;margin:0 auto}
+.profile-head{display:flex;align-items:center;gap:16px;margin-bottom:18px}
+.avatar-big{display:grid;place-items:center;flex:none;width:72px;height:72px;border-radius:50%;background:var(--ink);color:#fff;font:800 30px var(--display)}
+.profile h1{font-size:28px}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:14px 0 22px}
+.stats div{background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px;text-align:center}
+.stats b{display:block;font:800 26px var(--display)}
+.stats span{color:var(--ink-soft);font-size:14px}
+.profile h2{font-size:20px;margin:0 0 8px}
+.addr{background:#fff;border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:8px}
+
+/* overlays */
+#overlay:empty{display:none}
+.backdrop{position:fixed;inset:0;z-index:40;background:rgba(18,52,59,.55);display:flex;align-items:center;justify-content:center;padding:16px}
+.backdrop.side{justify-content:flex-end;padding:0;align-items:stretch}
+.backdrop.side.left{justify-content:flex-start}
+.dialog{position:relative;background:#fff;border-radius:14px;width:min(860px,100%);max-height:92vh;overflow:auto;padding:24px}
+.dialog.narrow{width:min(520px,100%)}
+.drawer{background:#fff;width:min(430px,100%);height:100%;overflow:auto;padding:22px;animation:slide .2s ease-out}
+.drawer.left{width:min(330px,100%);animation:slideL .2s ease-out}
+@keyframes slide{from{transform:translateX(40px);opacity:0}to{transform:none;opacity:1}}
+@keyframes slideL{from{transform:translateX(-40px);opacity:0}to{transform:none;opacity:1}}
+.x{position:absolute;top:10px;right:12px;background:none;border:0;font-size:28px;line-height:1;color:var(--ink-soft);padding:4px 8px}
+.menu-list{display:grid;gap:2px;margin-top:14px}
+.menu-list button{display:flex;justify-content:space-between;align-items:center;gap:8px;background:none;border:0;text-align:left;padding:11px 12px;border-radius:8px;font-size:17px}
+.menu-list button:hover,.menu-list button[aria-current="true"]{background:var(--paper)}
+.menu-list button[aria-current="true"]{font-weight:600}
+.menu-list .parent svg{flex:none;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;transition:transform .15s}
+.menu-list .parent[aria-expanded="true"] svg{transform:rotate(180deg)}
+.menu-list .parent[aria-expanded="true"]{font-weight:600}
+.subs{display:grid;gap:2px;margin:0 0 6px 14px;padding-left:10px;border-left:2px solid var(--line)}
+.subs[hidden]{display:none}
+.menu-list .sub{font-size:16px;color:var(--ink-soft)}
+.dlg-grid{display:grid;grid-template-columns:minmax(180px,300px) 1fr;gap:24px}
+.dlg-tile{position:relative;display:grid;place-items:center;aspect-ratio:1;border-radius:10px;overflow:hidden;color:rgba(255,255,255,.92);font:800 84px/1 var(--display);letter-spacing:-.03em}
+.dlg-media{align-self:start}
+.thumbs{display:flex;gap:8px;margin-top:8px}
+.thumb{width:56px;height:56px;padding:0;border:2px solid transparent;border-radius:8px;overflow:hidden;background:var(--line)}
+.thumb[aria-pressed="true"]{border-color:var(--ink)}
+.thumb img{display:block;width:100%;height:100%;object-fit:cover}
+.dlg-info h2{font-size:28px;margin-bottom:4px;padding-right:30px}
+.muted{color:var(--ink-soft);margin:0 0 8px;font-size:15px}
+fieldset{border:0;padding:0;margin:14px 0}
+legend{font-weight:600;margin-bottom:6px;padding:0}
+.opts{display:flex;flex-wrap:wrap;gap:8px}
+.opt{border:1px solid var(--line);background:#fff;border-radius:8px;padding:7px 12px;text-align:left}
+.opt[aria-pressed="true"]{border:2px solid var(--ink);padding:6px 11px}
+.opt small{display:block;color:var(--ink-soft)}
+.opt:disabled{opacity:.45;cursor:not-allowed}
+.stock{margin:6px 0;font-weight:600}
+.stock.low{color:var(--danger)}
+.row{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-top:12px}
+.stepper{display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.stepper button{background:#fff;border:0;width:34px;height:34px;font-size:18px}
+.stepper span{min-width:34px;text-align:center;font-weight:600}
+.similar{margin-top:26px;border-top:1px solid var(--line);padding-top:16px}
+.similar h3,.reviews h3{font-size:20px;margin-bottom:10px}
+.reviews{margin-top:26px;border-top:1px solid var(--line);padding-top:16px}
+.review{padding:10px 0;border-bottom:1px solid var(--line)}
+.review b{font-weight:600}
+.field{display:block;margin:10px 0}
+.field span{display:block;font-weight:600;margin-bottom:4px}
+.field textarea,.field input,.field select{width:100%}
+.err{color:var(--danger);margin:8px 0 0;font-weight:600}
+.ok{color:var(--ok);margin:6px 0 0;font-weight:600}
+
+/* cart and checkout */
+.line{display:grid;grid-template-columns:1fr auto;gap:2px 12px;padding:12px 0;border-bottom:1px solid var(--line)}
+.line .name{font-weight:600}
+.line .controls{grid-column:1/-1;display:flex;align-items:center;gap:12px;margin-top:4px}
+.sum{margin:16px 0;display:grid;gap:4px}
+.sum div{display:flex;justify-content:space-between}
+.sum .total{font:800 20px var(--display);border-top:1px solid var(--line);padding-top:8px;margin-top:4px}
+.coupon{display:flex;gap:8px;margin-top:14px}
+.coupon input{flex:1;min-width:0;border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+.pick{display:flex;gap:10px;align-items:flex-start;padding:10px;border:1px solid var(--line);border-radius:8px;margin:6px 0}
+.pick input{margin-top:5px}
+
+/* orders */
+.order{background:#fff;border:1px solid var(--line);border-radius:10px;padding:18px;margin-bottom:16px}
+.order-head{display:flex;flex-wrap:wrap;justify-content:space-between;gap:8px;align-items:baseline;margin-bottom:10px}
+.order-head h2{font-size:20px}
+.chip{display:inline-block;padding:2px 10px;border-radius:999px;font-weight:600;font-size:14px}
+.s-Delivered,.s-Completed{background:#E3F3EA;color:#17603B}
+.s-Shipped{background:#E4EAF8;color:#2F4B9B}
+.s-Processing,.s-Pending{background:#FFF0CF;color:#7A4F00}
+.s-Cancelled,.s-Failed,.s-Refunded{background:#FBE5E3;color:var(--danger)}
+.order table{width:100%;border-collapse:collapse;margin:8px 0}
+.order th{text-align:left;font-weight:600;color:var(--ink-soft);font-size:14px;padding:4px 6px 4px 0}
+.order td{padding:6px 6px 6px 0;border-top:1px solid var(--line)}
+.order td.r,.order th.r{text-align:right}
+.facts{display:grid;gap:4px;margin-top:10px;font-size:15px}
+
+#toast{position:fixed;left:50%;bottom:92px;transform:translateX(-50%);z-index:60;background:var(--ink);color:#fff;padding:10px 18px;border-radius:999px;opacity:0;pointer-events:none;transition:opacity .2s;max-width:calc(100% - 24px);text-align:center}
+#toast.show{opacity:1}
+footer{max-width:1200px;margin:0 auto;padding:0 clamp(14px,3vw,32px) 24px;color:var(--ink-soft);font-size:14px}
+
+/* tablets and phones */
+@media (max-width:900px){
+  .perks{grid-template-columns:repeat(2,1fr)}
+}
+@media (max-width:760px){
+  .hero{grid-template-columns:1fr}
+  .hero-art img{min-height:0;height:220px}
+}
+@media (max-width:640px){
+  .logo{font-size:21px}
+  .top-right{gap:8px}
+  .grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+  .grid.small{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .card-name{font-size:15px}
+  .card-meta,.rating{font-size:13px}
+  .card-body{padding:10px 10px 12px}
+  .tag{font-size:13px;padding:4px 10px 4px 20px}
+  .dlg-grid{grid-template-columns:1fr}
+  .dlg-tile{aspect-ratio:16/9;font-size:56px}
+  .dialog{max-height:100vh;border-radius:0;height:100%}
+  .backdrop{padding:0}
+  .perk{padding:12px}
+}
+@media (max-width:360px){
+  .logo{font-size:19px}
+  .perks{grid-template-columns:1fr}
+}
+@media (prefers-reduced-motion:reduce){
+  html{scroll-behavior:auto}
+  .drawer,.drawer.left{animation:none}
+  #toast,.tip,.menu-list .parent svg{transition:none}
+}
+</style>
+</head>
+<body>
+<header class="top">
+  <button class="burger" data-act="menu-open" aria-label="Open menu"><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><path d="M3 6h18M3 12h18M3 18h18" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/></svg></button>
+  <button class="logo" data-act="nav" data-view="home">ShopSphere</button>
+  <div class="top-right">
+    <button class="cart-btn" data-act="cart-open" aria-label="Open cart"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M7 18c-1.1 0-1.99.9-1.99 2S5.9 22 7 22s2-.9 2-2-.9-2-2-2zM1 2v2h2l3.6 7.59-1.35 2.45c-.16.28-.25.61-.25.96 0 1.1.9 2 2 2h12v-2H7.42c-.14 0-.25-.11-.25-.25l.03-.12.9-1.63h7.45c.75 0 1.41-.41 1.75-1.03l3.58-6.49c.08-.14.12-.31.12-.48 0-.55-.45-1-1-1H5.21l-.94-2H1zm16 16c-1.1 0-1.99.9-1.99 2s.89 2 1.99 2 2-.9 2-2-.9-2-2-2z"/></svg><span class="pill" id="n-cart" hidden>0</span></button>
+    <div id="account"></div>
+  </div>
+</header>
+<div class="searchbar">
+  <div class="search">
+    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+    <label class="sr" for="q">Search products</label>
+    <input id="q" type="search" placeholder="Search for products" autocomplete="off">
+  </div>
+</div>
+<main id="main"></main>
+<footer>ShopSphere is a student project. The products, customers and orders here are the sample rows from the project's SQL Server database. Anything you change stays in this page until the backend is connected.</footer>
+<nav class="dock" aria-label="Main">
+  <button data-act="nav" data-view="home"><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><path d="M3 11l9-8 9 8v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>Home</button>
+  <button data-act="nav" data-view="wishlist"><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>Wishlist<span class="count" id="n-wish" hidden>0</span></button>
+  <button data-act="nav" data-view="orders"><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><path d="M21 8l-9-5-9 5v8l9 5 9-5z"/><path d="M3 8l9 5 9-5M12 13v8"/></svg>My orders</button>
+  <button data-act="profile-open"><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>Profile</button>
+</nav>
+<div id="overlay"></div>
+<div id="toast" role="status" aria-live="polite"></div>
+<noscript>This page needs JavaScript to show the shop.</noscript>
+
+<script>
+/*
+  How this page works
+  - DB below holds the sample rows from schema.sql (products, variants, customers, orders, and so on).
+  - When the backend exists, replace DB with data fetched from the API. The rest of the page stays the same.
+  - Cart, wishlist, new orders, reviews and new accounts live in memory only, so a page refresh resets them.
+*/
+(function () {
+'use strict';
+const DB = {"categories":[{"id":1,"name":"Electronics","parentId":null},{"id":2,"name":"Fashion","parentId":null},{"id":3,"name":"Home & Kitchen","parentId":null},{"id":4,"name":"Books","parentId":null},{"id":5,"name":"Sports & Outdoors","parentId":null},{"id":6,"name":"Mobiles","parentId":1},{"id":7,"name":"Laptops","parentId":1},{"id":8,"name":"Men's Clothing","parentId":2},{"id":9,"name":"Women's Clothing","parentId":2},{"id":10,"name":"Beauty & Personal Care","parentId":null},{"id":11,"name":"Men's Footwear","parentId":2},{"id":12,"name":"Men's Accessories","parentId":2},{"id":13,"name":"Women's Footwear","parentId":2},{"id":14,"name":"Women's Accessories","parentId":2},{"id":15,"name":"Kids' Clothing","parentId":2},{"id":16,"name":"Skincare","parentId":10},{"id":17,"name":"Fragrances","parentId":10},{"id":18,"name":"Audio","parentId":1},{"id":19,"name":"Computer Accessories","parentId":1},{"id":20,"name":"Bath & Body","parentId":null},{"id":21,"name":"Towels & Bath Robes","parentId":20},{"id":22,"name":"Body Wash & Soap","parentId":20},{"id":23,"name":"Bath Accessories","parentId":20},{"id":24,"name":"Hair Care","parentId":20}],"sellers":[{"id":1,"name":"TechHub Electronics","rating":4.3},{"id":2,"name":"StyleNest Fashion","rating":4.1},{"id":3,"name":"HomeEase Essentials","rating":4.5},{"id":4,"name":"GlowHouse Beauty","rating":4.4}],"products":[{"id":1,"name":"Wireless Bluetooth Earbuds","description":"Compact earbuds with 24-hour battery life","categoryId":6,"sellerId":1,"basePrice":4999},{"id":2,"name":"Smartphone 128GB","description":"Mid-range smartphone with 6.5-inch display","categoryId":6,"sellerId":1,"basePrice":54999},{"id":3,"name":"Slim Laptop 14-inch","description":"Lightweight laptop for everyday use","categoryId":7,"sellerId":1,"basePrice":89999},{"id":4,"name":"Gaming Laptop 15.6-inch","description":"High-performance laptop with dedicated GPU","categoryId":7,"sellerId":1,"basePrice":189999},{"id":5,"name":"Wireless Mouse","description":"Ergonomic wireless mouse","categoryId":1,"sellerId":1,"basePrice":1499},{"id":6,"name":"Men's Casual Shirt","description":"Cotton casual shirt, regular fit","categoryId":8,"sellerId":2,"basePrice":2199},{"id":7,"name":"Men's Denim Jeans","description":"Slim-fit denim jeans","categoryId":8,"sellerId":2,"basePrice":3299},{"id":8,"name":"Women's Kurti","description":"Printed cotton kurti","categoryId":9,"sellerId":2,"basePrice":1899},{"id":9,"name":"Women's Handbag","description":"Faux leather shoulder bag","categoryId":14,"sellerId":2,"basePrice":2799},{"id":10,"name":"Non-Stick Cookware Set","description":"5-piece non-stick cookware set","categoryId":3,"sellerId":3,"basePrice":6499},{"id":11,"name":"Electric Kettle 1.7L","description":"Stainless steel electric kettle","categoryId":3,"sellerId":3,"basePrice":2399},{"id":12,"name":"Bedsheet Set (King Size)","description":"Cotton bedsheet set with 2 pillow covers","categoryId":3,"sellerId":3,"basePrice":3199},{"id":13,"name":"Table Lamp","description":"Modern LED table lamp","categoryId":3,"sellerId":3,"basePrice":1799},{"id":14,"name":"Self-Help Book: Atomic Habits","description":"Bestselling book on building good habits","categoryId":4,"sellerId":3,"basePrice":1299},{"id":15,"name":"Novel: The Silent Patient","description":"Psychological thriller novel","categoryId":4,"sellerId":3,"basePrice":999},{"id":16,"name":"Yoga Mat","description":"Non-slip yoga mat, 6mm thick","categoryId":5,"sellerId":3,"basePrice":1599},{"id":17,"name":"Running Shoes","description":"Lightweight running shoes with cushioned sole","categoryId":5,"sellerId":2,"basePrice":4599},{"id":18,"name":"Adjustable Dumbbell Set","description":"Pair of adjustable dumbbells, 2-20kg","categoryId":5,"sellerId":3,"basePrice":8999},{"id":19,"name":"Wireless Charging Pad","description":"Fast wireless charger for smartphones","categoryId":6,"sellerId":1,"basePrice":1999},{"id":20,"name":"Laptop Backpack","description":"Water-resistant laptop backpack, 15.6-inch","categoryId":7,"sellerId":1,"basePrice":2599},{"id":21,"name":"Men's Polo Shirt","description":"Soft cotton polo shirt with a classic collar","categoryId":8,"sellerId":2,"basePrice":1799},{"id":22,"name":"Men's Graphic T-Shirt","description":"Round-neck cotton t-shirt with a printed design","categoryId":8,"sellerId":2,"basePrice":1299},{"id":23,"name":"Men's Chino Trousers","description":"Slim-fit cotton chino trousers for work or weekends","categoryId":8,"sellerId":2,"basePrice":3499},{"id":24,"name":"Men's Zip Hoodie","description":"Warm fleece hoodie with a front zip and pockets","categoryId":8,"sellerId":2,"basePrice":3999},{"id":25,"name":"Men's Winter Jacket","description":"Padded winter jacket with a water-resistant outer layer","categoryId":8,"sellerId":2,"basePrice":7999},{"id":26,"name":"Men's Cotton Shalwar Kameez","description":"Two-piece cotton shalwar kameez for daily and festive wear","categoryId":8,"sellerId":2,"basePrice":4599},{"id":27,"name":"Men's Leather Loafers","description":"Slip-on leather loafers with a cushioned insole","categoryId":11,"sellerId":2,"basePrice":5499},{"id":28,"name":"Men's Canvas Sneakers","description":"Lightweight canvas sneakers for everyday wear","categoryId":11,"sellerId":2,"basePrice":3299},{"id":29,"name":"Men's Leather Wallet","description":"Slim leather wallet with card slots and a coin pocket","categoryId":12,"sellerId":2,"basePrice":1499},{"id":30,"name":"Men's Analog Wrist Watch","description":"Stainless steel analog watch with a date window","categoryId":12,"sellerId":2,"basePrice":6999},{"id":31,"name":"Polarized Sunglasses","description":"UV-protection polarized sunglasses with a light frame","categoryId":12,"sellerId":2,"basePrice":2499},{"id":32,"name":"Women's Floral Maxi Dress","description":"Flowing maxi dress with a floral print","categoryId":9,"sellerId":2,"basePrice":4299},{"id":33,"name":"Women's Embroidered Lawn Suit","description":"Three-piece lawn suit with an embroidered neckline","categoryId":9,"sellerId":2,"basePrice":5499},{"id":34,"name":"Women's Denim Jacket","description":"Classic denim jacket with a button front","categoryId":9,"sellerId":2,"basePrice":3999},{"id":35,"name":"Women's Block Heels","description":"Comfortable block heels with an ankle strap","categoryId":13,"sellerId":2,"basePrice":4499},{"id":36,"name":"Women's Embroidered Khussa","description":"Traditional khussa with embroidery","categoryId":13,"sellerId":2,"basePrice":2799},{"id":37,"name":"Women's Cotton Shawl","description":"Light cotton shawl in a solid colour","categoryId":14,"sellerId":2,"basePrice":1799},{"id":38,"name":"Pearl Drop Earrings","description":"Pearl-style drop earrings with silver-tone hooks","categoryId":14,"sellerId":2,"basePrice":1599},{"id":39,"name":"Women's Silk Scarf","description":"Smooth printed scarf that works all year","categoryId":14,"sellerId":2,"basePrice":1399},{"id":40,"name":"Kids Cotton T-Shirt Set","description":"Set of three soft cotton t-shirts for kids","categoryId":15,"sellerId":2,"basePrice":1599},{"id":41,"name":"Kids Denim Dungarees","description":"Soft denim dungarees with adjustable straps","categoryId":15,"sellerId":2,"basePrice":2199},{"id":42,"name":"Kids Winter Sweater","description":"Warm knitted sweater for cold days","categoryId":15,"sellerId":2,"basePrice":1899},{"id":43,"name":"Bluetooth Speaker","description":"Portable speaker with deep bass and a 12-hour battery","categoryId":18,"sellerId":1,"basePrice":5999},{"id":44,"name":"Over-Ear Headphones","description":"Wireless over-ear headphones with soft ear cushions","categoryId":18,"sellerId":1,"basePrice":8499},{"id":45,"name":"Mechanical Keyboard","description":"Full-size mechanical keyboard with backlit keys","categoryId":19,"sellerId":1,"basePrice":6499},{"id":46,"name":"USB-C Hub","description":"Seven-port USB-C hub with HDMI and a card reader","categoryId":19,"sellerId":1,"basePrice":3299},{"id":47,"name":"Fast Charger 33W","description":"33W fast charger with a USB-C cable","categoryId":6,"sellerId":1,"basePrice":1799},{"id":48,"name":"Laptop Sleeve 14-inch","description":"Padded sleeve that protects a 14-inch laptop","categoryId":7,"sellerId":1,"basePrice":1299},{"id":49,"name":"Air Fryer 4L","description":"Air fryer for crisp food with very little oil","categoryId":3,"sellerId":3,"basePrice":14999},{"id":50,"name":"Ceramic Dinner Set 24-piece","description":"Ceramic dinner set for six people","categoryId":3,"sellerId":3,"basePrice":7499},{"id":51,"name":"Memory Foam Pillow","description":"Supportive memory foam pillow for side and back sleepers","categoryId":3,"sellerId":3,"basePrice":2499},{"id":52,"name":"Stainless Steel Water Bottle","description":"Insulated bottle that keeps drinks cold or hot for hours","categoryId":3,"sellerId":3,"basePrice":1399},{"id":53,"name":"Wall Clock","description":"Silent round wall clock for any room","categoryId":3,"sellerId":3,"basePrice":1999},{"id":54,"name":"Novel: The Alchemist","description":"Story of a shepherd who follows his dream","categoryId":4,"sellerId":3,"basePrice":1099},{"id":55,"name":"Book: Rich Dad Poor Dad","description":"Book about money habits and building wealth","categoryId":4,"sellerId":3,"basePrice":1199},{"id":56,"name":"Book: Deep Work","description":"Book about focusing without distraction","categoryId":4,"sellerId":3,"basePrice":1399},{"id":57,"name":"Football Size 5","description":"Stitched football for grass and hard ground","categoryId":5,"sellerId":3,"basePrice":2199},{"id":58,"name":"Badminton Racket Set","description":"Set of two rackets with shuttlecocks and a bag","categoryId":5,"sellerId":3,"basePrice":3499},{"id":59,"name":"Camping Backpack 40L","description":"Water-resistant 40 litre backpack for trips","categoryId":5,"sellerId":3,"basePrice":5999},{"id":60,"name":"Daily Face Wash","description":"Gentle face wash for everyday use","categoryId":16,"sellerId":4,"basePrice":899},{"id":61,"name":"Vitamin C Serum","description":"Brightening serum for fresher-looking skin","categoryId":16,"sellerId":4,"basePrice":2199},{"id":62,"name":"Sunscreen SPF 50","description":"Lightweight sunscreen with high sun protection","categoryId":16,"sellerId":4,"basePrice":1599},{"id":63,"name":"Men's Eau de Parfum 100ml","description":"Woody long-lasting fragrance for men","categoryId":17,"sellerId":4,"basePrice":4999},{"id":64,"name":"Women's Eau de Parfum 100ml","description":"Floral long-lasting fragrance for women","categoryId":17,"sellerId":4,"basePrice":5499},{"id":65,"name":"Cotton Bath Towel","description":"Soft absorbent cotton bath towel, large size","categoryId":21,"sellerId":3,"basePrice":1299},{"id":66,"name":"Hand Towel Set of 4","description":"Four quick-drying cotton hand towels","categoryId":21,"sellerId":3,"basePrice":1499},{"id":67,"name":"Hooded Kids Bath Towel","description":"Soft hooded towel sized for children","categoryId":21,"sellerId":3,"basePrice":1099},{"id":68,"name":"Cotton Bath Robe","description":"Thick cotton bath robe with a belt and two pockets","categoryId":21,"sellerId":3,"basePrice":3999},{"id":69,"name":"Microfiber Hair Towel Wrap","description":"Quick-dry microfiber wrap for drying long hair","categoryId":21,"sellerId":3,"basePrice":899},{"id":70,"name":"Moisturizing Body Wash 500ml","description":"Gentle body wash that leaves skin soft","categoryId":22,"sellerId":4,"basePrice":1199},{"id":71,"name":"Shower Gel 250ml","description":"Fresh-smelling shower gel for daily use","categoryId":22,"sellerId":4,"basePrice":799},{"id":72,"name":"Natural Soap Bar Pack of 6","description":"Six plant-based soap bars","categoryId":22,"sellerId":4,"basePrice":999},{"id":73,"name":"Coffee Body Scrub 200g","description":"Exfoliating body scrub with ground coffee","categoryId":22,"sellerId":4,"basePrice":1399},{"id":74,"name":"Bath Loofah Sponge Set","description":"Set of three loofah sponges for the shower","categoryId":23,"sellerId":3,"basePrice":499},{"id":75,"name":"Anti-Slip Bath Mat","description":"Soft bath mat with a non-slip back","categoryId":23,"sellerId":3,"basePrice":1299},{"id":76,"name":"Shower Caddy Organizer","description":"Hanging organizer for shampoo and soap","categoryId":23,"sellerId":3,"basePrice":1999},{"id":77,"name":"Soap Dispenser Bottle","description":"Refillable pump bottle for liquid soap","categoryId":23,"sellerId":3,"basePrice":899},{"id":78,"name":"Daily Shampoo 400ml","description":"Mild shampoo for everyday washing","categoryId":24,"sellerId":4,"basePrice":1099},{"id":79,"name":"Conditioner 400ml","description":"Smoothing conditioner for soft, manageable hair","categoryId":24,"sellerId":4,"basePrice":1099}],"variants":[{"id":1,"productId":1,"sku":"EAR-BLK","size":"Standard","color":"Black","price":4999,"stock":40},{"id":2,"productId":1,"sku":"EAR-WHT","size":"Standard","color":"White","price":4999,"stock":25},{"id":3,"productId":2,"sku":"PH-128-BLK","size":"128GB","color":"Black","price":54999,"stock":12},{"id":4,"productId":2,"sku":"PH-128-BLU","size":"128GB","color":"Blue","price":54999,"stock":8},{"id":5,"productId":3,"sku":"LT-SLIM-SLV","size":"14-inch","color":"Silver","price":89999,"stock":6},{"id":6,"productId":4,"sku":"LT-GAME-BLK","size":"15.6-inch","color":"Black","price":189999,"stock":3},{"id":7,"productId":5,"sku":"MS-WL-BLK","size":"Standard","color":"Black","price":1499,"stock":60},{"id":8,"productId":5,"sku":"MS-WL-GRY","size":"Standard","color":"Grey","price":1499,"stock":35},{"id":9,"productId":6,"sku":"SH-M-BLU","size":"M","color":"Blue","price":2199,"stock":30},{"id":10,"productId":6,"sku":"SH-L-BLU","size":"L","color":"Blue","price":2199,"stock":22},{"id":11,"productId":6,"sku":"SH-L-WHT","size":"L","color":"White","price":2199,"stock":4},{"id":12,"productId":7,"sku":"JN-32-BLU","size":"32","color":"Blue","price":3299,"stock":18},{"id":13,"productId":7,"sku":"JN-34-BLK","size":"34","color":"Black","price":3299,"stock":9},{"id":14,"productId":8,"sku":"KU-M-RED","size":"M","color":"Red","price":1899,"stock":28},{"id":15,"productId":8,"sku":"KU-L-GRN","size":"L","color":"Green","price":1899,"stock":5},{"id":16,"productId":9,"sku":"HB-BRN","size":"Standard","color":"Brown","price":2799,"stock":14},{"id":17,"productId":10,"sku":"CK-5PC","size":"5-piece","color":"Black","price":6499,"stock":10},{"id":18,"productId":11,"sku":"KT-17-SLV","size":"1.7L","color":"Silver","price":2399,"stock":26},{"id":19,"productId":12,"sku":"BS-KING-WHT","size":"King","color":"White","price":3199,"stock":15},{"id":20,"productId":13,"sku":"LP-LED-WHT","size":"Standard","color":"White","price":1799,"stock":2},{"id":21,"productId":14,"sku":"BK-ATOM","size":"Paperback","color":"N/A","price":1299,"stock":50},{"id":22,"productId":15,"sku":"BK-SILENT","size":"Paperback","color":"N/A","price":999,"stock":45},{"id":23,"productId":16,"sku":"YM-6MM-PRP","size":"6mm","color":"Purple","price":1599,"stock":32},{"id":24,"productId":17,"sku":"RS-42-BLK","size":"42","color":"Black","price":4599,"stock":12},{"id":25,"productId":17,"sku":"RS-44-BLK","size":"44","color":"Black","price":4599,"stock":7},{"id":26,"productId":18,"sku":"DB-ADJ-20","size":"2-20kg","color":"Black","price":8999,"stock":6},{"id":27,"productId":19,"sku":"WC-PAD-BLK","size":"Standard","color":"Black","price":1999,"stock":38},{"id":28,"productId":20,"sku":"BP-156-GRY","size":"15.6-inch","color":"Grey","price":2599,"stock":20},{"id":29,"productId":21,"sku":"PO-M-NVY","size":"M","color":"Navy","price":1799,"stock":24},{"id":30,"productId":21,"sku":"PO-L-NVY","size":"L","color":"Navy","price":1799,"stock":18},{"id":31,"productId":21,"sku":"PO-L-WHT","size":"L","color":"White","price":1799,"stock":6},{"id":32,"productId":22,"sku":"GT-M-BLK","size":"M","color":"Black","price":1299,"stock":30},{"id":33,"productId":22,"sku":"GT-L-BLK","size":"L","color":"Black","price":1299,"stock":26},{"id":34,"productId":23,"sku":"CH-32-KHK","size":"32","color":"Khaki","price":3499,"stock":14},{"id":35,"productId":23,"sku":"CH-34-OLV","size":"34","color":"Olive","price":3499,"stock":9},{"id":36,"productId":24,"sku":"HD-M-GRY","size":"M","color":"Grey","price":3999,"stock":12},{"id":37,"productId":24,"sku":"HD-L-NVY","size":"L","color":"Navy","price":3999,"stock":7},{"id":38,"productId":25,"sku":"JK-L-BLK","size":"L","color":"Black","price":7999,"stock":8},{"id":39,"productId":25,"sku":"JK-XL-BLK","size":"XL","color":"Black","price":7999,"stock":5},{"id":40,"productId":26,"sku":"SK-M-WHT","size":"M","color":"White","price":4599,"stock":15},{"id":41,"productId":26,"sku":"SK-L-CRM","size":"L","color":"Cream","price":4599,"stock":11},{"id":42,"productId":27,"sku":"LF-42-BRN","size":"42","color":"Brown","price":5499,"stock":9},{"id":43,"productId":27,"sku":"LF-43-BLK","size":"43","color":"Black","price":5499,"stock":12},{"id":44,"productId":28,"sku":"SN-41-WHT","size":"41","color":"White","price":3299,"stock":20},{"id":45,"productId":28,"sku":"SN-43-WHT","size":"43","color":"White","price":3299,"stock":16},{"id":46,"productId":29,"sku":"WL-BLK","size":"Standard","color":"Black","price":1499,"stock":35},{"id":47,"productId":29,"sku":"WL-BRN","size":"Standard","color":"Brown","price":1499,"stock":28},{"id":48,"productId":30,"sku":"MW-SLV","size":"Standard","color":"Silver","price":6999,"stock":7},{"id":49,"productId":31,"sku":"SG-BLK","size":"Standard","color":"Black","price":2499,"stock":22},{"id":50,"productId":32,"sku":"MD-S-FLR","size":"S","color":"Floral","price":4299,"stock":10},{"id":51,"productId":32,"sku":"MD-M-FLR","size":"M","color":"Floral","price":4299,"stock":13},{"id":52,"productId":33,"sku":"LS-M-TEL","size":"M","color":"Teal","price":5499,"stock":14},{"id":53,"productId":33,"sku":"LS-L-MRN","size":"L","color":"Maroon","price":5499,"stock":6},{"id":54,"productId":34,"sku":"DJ-S-BLU","size":"S","color":"Blue","price":3999,"stock":9},{"id":55,"productId":34,"sku":"DJ-M-BLU","size":"M","color":"Blue","price":3999,"stock":11},{"id":56,"productId":35,"sku":"BH-37-BLK","size":"37","color":"Black","price":4499,"stock":8},{"id":57,"productId":35,"sku":"BH-38-NUD","size":"38","color":"Nude","price":4499,"stock":10},{"id":58,"productId":36,"sku":"KH-37-GLD","size":"37","color":"Gold","price":2799,"stock":12},{"id":59,"productId":36,"sku":"KH-39-RED","size":"39","color":"Red","price":2799,"stock":4},{"id":60,"productId":37,"sku":"SW-GRY","size":"Standard","color":"Grey","price":1799,"stock":25},{"id":61,"productId":37,"sku":"SW-MRN","size":"Standard","color":"Maroon","price":1799,"stock":18},{"id":62,"productId":38,"sku":"PE-WHT","size":"Standard","color":"White","price":1599,"stock":30},{"id":63,"productId":39,"sku":"SC-RED","size":"Standard","color":"Red","price":1399,"stock":19},{"id":64,"productId":39,"sku":"SC-BLU","size":"Standard","color":"Blue","price":1399,"stock":15},{"id":65,"productId":40,"sku":"KT-4Y","size":"4Y","color":"Mixed","price":1599,"stock":22},{"id":66,"productId":40,"sku":"KT-6Y","size":"6Y","color":"Mixed","price":1599,"stock":17},{"id":67,"productId":41,"sku":"KD-4Y","size":"4Y","color":"Blue","price":2199,"stock":13},{"id":68,"productId":41,"sku":"KD-6Y","size":"6Y","color":"Blue","price":2199,"stock":9},{"id":69,"productId":42,"sku":"KS-4Y","size":"4Y","color":"Red","price":1899,"stock":15},{"id":70,"productId":42,"sku":"KS-6Y","size":"6Y","color":"Green","price":1899,"stock":3},{"id":71,"productId":43,"sku":"BS-BLK","size":"Standard","color":"Black","price":5999,"stock":18},{"id":72,"productId":43,"sku":"BS-BLU","size":"Standard","color":"Blue","price":5999,"stock":6},{"id":73,"productId":44,"sku":"HP-BLK","size":"Standard","color":"Black","price":8499,"stock":11},{"id":74,"productId":45,"sku":"KB-MEC-BLK","size":"Standard","color":"Black","price":6499,"stock":9},{"id":75,"productId":46,"sku":"HB-7IN1","size":"7-in-1","color":"Grey","price":3299,"stock":27},{"id":76,"productId":47,"sku":"FC-33W","size":"33W","color":"White","price":1799,"stock":40},{"id":77,"productId":48,"sku":"LS-14-GRY","size":"14-inch","color":"Grey","price":1299,"stock":33},{"id":78,"productId":49,"sku":"AF-4L","size":"4L","color":"Black","price":14999,"stock":5},{"id":79,"productId":50,"sku":"DS-24","size":"24-piece","color":"White","price":7499,"stock":8},{"id":80,"productId":51,"sku":"PL-MF","size":"Standard","color":"White","price":2499,"stock":21},{"id":81,"productId":52,"sku":"WB-750-STL","size":"750ml","color":"Steel","price":1399,"stock":34},{"id":82,"productId":52,"sku":"WB-750-BLK","size":"750ml","color":"Black","price":1399,"stock":29},{"id":83,"productId":53,"sku":"WC-30","size":"30cm","color":"Black","price":1999,"stock":16},{"id":84,"productId":54,"sku":"BK-ALC","size":"Paperback","color":"N/A","price":1099,"stock":38},{"id":85,"productId":55,"sku":"BK-RDPD","size":"Paperback","color":"N/A","price":1199,"stock":31},{"id":86,"productId":56,"sku":"BK-DW","size":"Paperback","color":"N/A","price":1399,"stock":3},{"id":87,"productId":57,"sku":"FB-5","size":"Size 5","color":"White","price":2199,"stock":26},{"id":88,"productId":58,"sku":"BD-SET","size":"2 players","color":"Red","price":3499,"stock":14},{"id":89,"productId":59,"sku":"CB-40","size":"40L","color":"Green","price":5999,"stock":6},{"id":90,"productId":60,"sku":"FW-150","size":"150ml","color":"N/A","price":899,"stock":60},{"id":91,"productId":61,"sku":"VS-30","size":"30ml","color":"N/A","price":2199,"stock":24},{"id":92,"productId":62,"sku":"SS-50","size":"50ml","color":"N/A","price":1599,"stock":32},{"id":93,"productId":63,"sku":"EM-100","size":"100ml","color":"N/A","price":4999,"stock":12},{"id":94,"productId":64,"sku":"EW-100","size":"100ml","color":"N/A","price":5499,"stock":9},{"id":95,"productId":65,"sku":"BT-WHT","size":"Large","color":"White","price":1299,"stock":40},{"id":96,"productId":65,"sku":"BT-GRY","size":"Large","color":"Grey","price":1299,"stock":28},{"id":97,"productId":66,"sku":"HT-4PC","size":"4-piece","color":"Mixed","price":1499,"stock":22},{"id":98,"productId":67,"sku":"KBT-BLU","size":"Kids","color":"Blue","price":1099,"stock":16},{"id":99,"productId":67,"sku":"KBT-PNK","size":"Kids","color":"Pink","price":1099,"stock":14},{"id":100,"productId":68,"sku":"BR-M-WHT","size":"M","color":"White","price":3999,"stock":12},{"id":101,"productId":68,"sku":"BR-L-WHT","size":"L","color":"White","price":3999,"stock":9},{"id":102,"productId":68,"sku":"BR-L-GRY","size":"L","color":"Grey","price":3999,"stock":5},{"id":103,"productId":69,"sku":"HW-PNK","size":"Standard","color":"Pink","price":899,"stock":30},{"id":104,"productId":70,"sku":"BW-500-LAV","size":"500ml","color":"Lavender","price":1199,"stock":36},{"id":105,"productId":70,"sku":"BW-500-OCN","size":"500ml","color":"Ocean","price":1199,"stock":29},{"id":106,"productId":71,"sku":"SGL-250","size":"250ml","color":"Mint","price":799,"stock":44},{"id":107,"productId":72,"sku":"SP-6PK","size":"6-pack","color":"N/A","price":999,"stock":52},{"id":108,"productId":73,"sku":"BSC-200","size":"200g","color":"N/A","price":1399,"stock":18},{"id":109,"productId":74,"sku":"LF-3PC","size":"3-piece","color":"Mixed","price":499,"stock":60},{"id":110,"productId":75,"sku":"BM-60-GRY","size":"60x40cm","color":"Grey","price":1299,"stock":24},{"id":111,"productId":75,"sku":"BM-60-BLU","size":"60x40cm","color":"Blue","price":1299,"stock":8},{"id":112,"productId":76,"sku":"SCD-STL","size":"Standard","color":"Steel","price":1999,"stock":14},{"id":113,"productId":77,"sku":"SD-300","size":"300ml","color":"White","price":899,"stock":31},{"id":114,"productId":78,"sku":"SH-400","size":"400ml","color":"N/A","price":1099,"stock":40},{"id":115,"productId":79,"sku":"CN-400","size":"400ml","color":"N/A","price":1099,"stock":33}],"coupons":[{"id":1,"code":"SAVE10","type":"Percentage","value":10,"expiry":"2027-12-31"},{"id":2,"code":"WELCOME500","type":"Fixed","value":500,"expiry":"2027-06-30"},{"id":3,"code":"EID20","type":"Percentage","value":20,"expiry":"2026-04-30"},{"id":4,"code":"FLASH15","type":"Percentage","value":15,"expiry":"2027-03-31"},{"id":5,"code":"OLD5","type":"Percentage","value":5,"expiry":"2025-12-31"}],"customers":[{"id":1,"name":"Ali Raza","email":"ali.raza@example.com","phone":"03001234567"},{"id":2,"name":"Sara Khan","email":"sara.khan@example.com","phone":"03007654321"},{"id":3,"name":"Bilal Ahmed","email":"bilal.ahmed@example.com","phone":"03211234567"},{"id":4,"name":"Ayesha Malik","email":"ayesha.malik@example.com","phone":"03331234567"},{"id":5,"name":"Usman Tariq","email":"usman.tariq@example.com","phone":"03451234567"},{"id":6,"name":"Hira Fatima","email":"hira.fatima@example.com","phone":"03011234567"},{"id":7,"name":"Zain Abbas","email":"zain.abbas@example.com","phone":"03211239876"},{"id":8,"name":"Mahnoor Iqbal","email":"mahnoor.iqbal@example.com","phone":"03339876543"},{"id":9,"name":"Hamza Sheikh","email":"hamza.sheikh@example.com","phone":"03451239876"},{"id":10,"name":"Fatima Noor","email":"fatima.noor@example.com","phone":"03219876543"},{"id":11,"name":"Danish Aslam","email":"danish.aslam@example.com","phone":"03001239876"},{"id":12,"name":"Kinza Yousaf","email":"kinza.yousaf@example.com","phone":"03071234567"},{"id":13,"name":"Rehan Qureshi","email":"rehan.qureshi@example.com","phone":"03349876543"},{"id":14,"name":"Sana Riaz","email":"sana.riaz@example.com","phone":"03121234567"},{"id":15,"name":"Omar Farooq","email":"omar.farooq@example.com","phone":"03429876543"}],"addresses":[{"id":1,"customerId":1,"line1":"House 12, Street 5, Gulberg","city":"Lahore","postalCode":"54000","country":"Pakistan"},{"id":2,"customerId":2,"line1":"Flat 3B, DHA Phase 5","city":"Lahore","postalCode":"54792","country":"Pakistan"},{"id":3,"customerId":3,"line1":"House 45, F-10","city":"Islamabad","postalCode":"44000","country":"Pakistan"},{"id":4,"customerId":4,"line1":"House 8, North Nazimabad","city":"Karachi","postalCode":"74700","country":"Pakistan"},{"id":5,"customerId":5,"line1":"House 22, Model Town","city":"Lahore","postalCode":"54700","country":"Pakistan"},{"id":6,"customerId":6,"line1":"Flat 12, Clifton Block 2","city":"Karachi","postalCode":"75600","country":"Pakistan"},{"id":7,"customerId":7,"line1":"House 3, G-11","city":"Islamabad","postalCode":"44000","country":"Pakistan"},{"id":8,"customerId":8,"line1":"House 19, Johar Town","city":"Lahore","postalCode":"54782","country":"Pakistan"},{"id":9,"customerId":9,"line1":"House 6, Bahria Town","city":"Rawalpindi","postalCode":"46000","country":"Pakistan"},{"id":10,"customerId":10,"line1":"Flat 2A, PECHS","city":"Karachi","postalCode":"75400","country":"Pakistan"},{"id":11,"customerId":11,"line1":"House 14, Wapda Town","city":"Lahore","postalCode":"54770","country":"Pakistan"},{"id":12,"customerId":12,"line1":"House 9, Satellite Town","city":"Rawalpindi","postalCode":"46300","country":"Pakistan"},{"id":13,"customerId":13,"line1":"House 27, Faisal Town","city":"Lahore","postalCode":"54600","country":"Pakistan"},{"id":14,"customerId":14,"line1":"Flat 5C, Gulshan-e-Iqbal","city":"Karachi","postalCode":"75300","country":"Pakistan"},{"id":15,"customerId":15,"line1":"House 31, E-11","city":"Islamabad","postalCode":"44000","country":"Pakistan"}],"carts":{"1":[{"variantId":1,"qty":1},{"variantId":7,"qty":2}],"4":[{"variantId":17,"qty":1},{"variantId":18,"qty":1}],"3":[{"variantId":5,"qty":1}],"12":[{"variantId":27,"qty":1},{"variantId":21,"qty":2}],"13":[],"2":[{"variantId":14,"qty":2},{"variantId":16,"qty":1}],"5":[{"variantId":24,"qty":1}],"7":[{"variantId":23,"qty":1},{"variantId":26,"qty":1}]},"wishlist":{"12":[4,19],"13":[2,17],"14":[9,13],"15":[3],"1":[4],"2":[9],"3":[5],"6":[15],"5":[18],"7":[20]},"orders":[{"id":1,"customerId":1,"couponId":null,"date":"2026-01-10T11:20:00","status":"Delivered","total":6498},{"id":2,"customerId":2,"couponId":1,"date":"2026-01-25T15:45:00","status":"Delivered","total":7697},{"id":3,"customerId":3,"couponId":null,"date":"2026-02-14T09:10:00","status":"Delivered","total":89999},{"id":4,"customerId":4,"couponId":2,"date":"2026-02-28T18:30:00","status":"Delivered","total":10797},{"id":5,"customerId":1,"couponId":null,"date":"2026-03-12T13:05:00","status":"Delivered","total":54999},{"id":6,"customerId":5,"couponId":1,"date":"2026-04-03T10:00:00","status":"Delivered","total":7797},{"id":7,"customerId":6,"couponId":null,"date":"2026-04-19T16:40:00","status":"Cancelled","total":2598},{"id":8,"customerId":7,"couponId":3,"date":"2026-04-22T12:25:00","status":"Delivered","total":189999},{"id":9,"customerId":8,"couponId":null,"date":"2026-05-30T14:15:00","status":"Delivered","total":5697},{"id":10,"customerId":2,"couponId":null,"date":"2026-06-18T19:50:00","status":"Shipped","total":3199},{"id":11,"customerId":9,"couponId":1,"date":"2026-07-07T11:35:00","status":"Shipped","total":13598},{"id":12,"customerId":10,"couponId":null,"date":"2026-08-02T10:55:00","status":"Processing","total":12597},{"id":13,"customerId":11,"couponId":2,"date":"2026-08-21T17:20:00","status":"Pending","total":6497},{"id":14,"customerId":1,"couponId":null,"date":"2026-09-05T09:45:00","status":"Processing","total":54999}],"orderItems":[{"orderId":1,"variantId":1,"qty":1,"unitPrice":4999},{"orderId":1,"variantId":7,"qty":1,"unitPrice":1499},{"orderId":2,"variantId":9,"qty":2,"unitPrice":2199},{"orderId":2,"variantId":12,"qty":1,"unitPrice":3299},{"orderId":3,"variantId":5,"qty":1,"unitPrice":89999},{"orderId":4,"variantId":17,"qty":1,"unitPrice":6499},{"orderId":4,"variantId":18,"qty":2,"unitPrice":2399},{"orderId":5,"variantId":3,"qty":1,"unitPrice":54999},{"orderId":6,"variantId":24,"qty":1,"unitPrice":4599},{"orderId":6,"variantId":23,"qty":2,"unitPrice":1599},{"orderId":7,"variantId":21,"qty":2,"unitPrice":1299},{"orderId":8,"variantId":6,"qty":1,"unitPrice":189999},{"orderId":9,"variantId":14,"qty":3,"unitPrice":1899},{"orderId":10,"variantId":19,"qty":1,"unitPrice":3199},{"orderId":11,"variantId":26,"qty":1,"unitPrice":8999},{"orderId":11,"variantId":25,"qty":1,"unitPrice":4599},{"orderId":12,"variantId":2,"qty":2,"unitPrice":4999},{"orderId":12,"variantId":28,"qty":1,"unitPrice":2599},{"orderId":13,"variantId":10,"qty":1,"unitPrice":2199},{"orderId":13,"variantId":13,"qty":1,"unitPrice":3299},{"orderId":13,"variantId":8,"qty":1,"unitPrice":1499},{"orderId":14,"variantId":4,"qty":1,"unitPrice":54999}],"payments":[{"orderId":1,"method":"Credit Card","amount":6498,"status":"Completed","date":"2026-01-10T11:22:00"},{"orderId":2,"method":"Credit Card","amount":7697,"status":"Failed","date":"2026-01-25T15:46:00"},{"orderId":2,"method":"JazzCash","amount":7697,"status":"Completed","date":"2026-01-25T15:55:00"},{"orderId":3,"method":"Easypaisa","amount":89999,"status":"Completed","date":"2026-02-14T09:13:00"},{"orderId":4,"method":"Credit Card","amount":10797,"status":"Completed","date":"2026-02-28T18:32:00"},{"orderId":5,"method":"Cash on Delivery","amount":54999,"status":"Completed","date":"2026-03-15T13:05:00"},{"orderId":6,"method":"JazzCash","amount":7797,"status":"Completed","date":"2026-04-03T10:05:00"},{"orderId":7,"method":"Credit Card","amount":2598,"status":"Refunded","date":"2026-04-19T16:43:00"},{"orderId":8,"method":"Bank Transfer","amount":189999,"status":"Completed","date":"2026-04-22T12:55:00"},{"orderId":9,"method":"Cash on Delivery","amount":5697,"status":"Completed","date":"2026-06-03T14:15:00"},{"orderId":10,"method":"Easypaisa","amount":3199,"status":"Completed","date":"2026-06-18T19:54:00"},{"orderId":11,"method":"Credit Card","amount":13598,"status":"Completed","date":"2026-07-07T11:37:00"},{"orderId":12,"method":"JazzCash","amount":12597,"status":"Completed","date":"2026-08-02T11:01:00"},{"orderId":13,"method":"Cash on Delivery","amount":6497,"status":"Pending","date":"2026-08-21T17:20:00"},{"orderId":14,"method":"Credit Card","amount":54999,"status":"Completed","date":"2026-09-05T09:47:00"}],"shipments":[{"orderId":1,"addressId":1,"carrier":"TCS","tracking":"TRK-1001","status":"Delivered","shipped":"2026-01-11T11:20:00","delivered":"2026-01-13T11:20:00"},{"orderId":2,"addressId":2,"carrier":"Leopards","tracking":"TRK-1002","status":"Delivered","shipped":"2026-01-26T15:45:00","delivered":"2026-01-29T15:45:00"},{"orderId":3,"addressId":3,"carrier":"TCS","tracking":"TRK-1003","status":"Delivered","shipped":"2026-02-15T09:10:00","delivered":"2026-02-16T09:10:00"},{"orderId":4,"addressId":4,"carrier":"M&P","tracking":"TRK-1004","status":"Delivered","shipped":"2026-03-02T18:30:00","delivered":"2026-03-05T18:30:00"},{"orderId":5,"addressId":1,"carrier":"TCS","tracking":"TRK-1005","status":"Delivered","shipped":"2026-03-13T13:05:00","delivered":"2026-03-15T13:05:00"},{"orderId":6,"addressId":5,"carrier":"Leopards","tracking":"TRK-1006","status":"Delivered","shipped":"2026-04-04T10:00:00","delivered":"2026-04-06T10:00:00"},{"orderId":7,"addressId":6,"carrier":null,"tracking":null,"status":"Cancelled","shipped":null,"delivered":null},{"orderId":8,"addressId":7,"carrier":"TCS","tracking":"TRK-1008","status":"Delivered","shipped":"2026-04-23T12:25:00","delivered":"2026-04-24T12:25:00"},{"orderId":9,"addressId":8,"carrier":"Pakistan Post","tracking":"TRK-1009","status":"Delivered","shipped":"2026-06-01T14:15:00","delivered":"2026-06-05T14:15:00"},{"orderId":10,"addressId":2,"carrier":"TCS","tracking":"TRK-1010","status":"Shipped","shipped":"2026-06-19T19:50:00","delivered":null},{"orderId":11,"addressId":9,"carrier":"Leopards","tracking":"TRK-1011","status":"Shipped","shipped":"2026-07-08T11:35:00","delivered":null},{"orderId":12,"addressId":10,"carrier":null,"tracking":null,"status":"Processing","shipped":null,"delivered":null},{"orderId":13,"addressId":11,"carrier":null,"tracking":null,"status":"Processing","shipped":null,"delivered":null},{"orderId":14,"addressId":1,"carrier":null,"tracking":null,"status":"Processing","shipped":null,"delivered":null}],"images":[{"productId":1,"url":"https://images.shopsphere.example/p1-main.jpg","isPrimary":1},{"productId":2,"url":"https://images.shopsphere.example/p2-main.jpg","isPrimary":1},{"productId":3,"url":"https://images.shopsphere.example/p3-main.jpg","isPrimary":1},{"productId":4,"url":"https://images.shopsphere.example/p4-main.jpg","isPrimary":1},{"productId":5,"url":"https://images.shopsphere.example/p5-main.jpg","isPrimary":1},{"productId":6,"url":"https://images.shopsphere.example/p6-main.jpg","isPrimary":1},{"productId":7,"url":"https://images.shopsphere.example/p7-main.jpg","isPrimary":1},{"productId":8,"url":"https://images.shopsphere.example/p8-main.jpg","isPrimary":1},{"productId":9,"url":"https://images.shopsphere.example/p9-main.jpg","isPrimary":1},{"productId":10,"url":"https://images.shopsphere.example/p10-main.jpg","isPrimary":1},{"productId":11,"url":"https://images.shopsphere.example/p11-main.jpg","isPrimary":1},{"productId":12,"url":"https://images.shopsphere.example/p12-main.jpg","isPrimary":1},{"productId":13,"url":"https://images.shopsphere.example/p13-main.jpg","isPrimary":1},{"productId":14,"url":"https://images.shopsphere.example/p14-main.jpg","isPrimary":1},{"productId":15,"url":"https://images.shopsphere.example/p15-main.jpg","isPrimary":1},{"productId":16,"url":"https://images.shopsphere.example/p16-main.jpg","isPrimary":1},{"productId":17,"url":"https://images.shopsphere.example/p17-main.jpg","isPrimary":1},{"productId":18,"url":"https://images.shopsphere.example/p18-main.jpg","isPrimary":1},{"productId":19,"url":"https://images.shopsphere.example/p19-main.jpg","isPrimary":1},{"productId":20,"url":"https://images.shopsphere.example/p20-main.jpg","isPrimary":1},{"productId":21,"url":"https://images.shopsphere.example/p21-main.jpg","isPrimary":1},{"productId":22,"url":"https://images.shopsphere.example/p22-main.jpg","isPrimary":1},{"productId":23,"url":"https://images.shopsphere.example/p23-main.jpg","isPrimary":1},{"productId":24,"url":"https://images.shopsphere.example/p24-main.jpg","isPrimary":1},{"productId":25,"url":"https://images.shopsphere.example/p25-main.jpg","isPrimary":1},{"productId":26,"url":"https://images.shopsphere.example/p26-main.jpg","isPrimary":1},{"productId":27,"url":"https://images.shopsphere.example/p27-main.jpg","isPrimary":1},{"productId":28,"url":"https://images.shopsphere.example/p28-main.jpg","isPrimary":1},{"productId":29,"url":"https://images.shopsphere.example/p29-main.jpg","isPrimary":1},{"productId":30,"url":"https://images.shopsphere.example/p30-main.jpg","isPrimary":1},{"productId":31,"url":"https://images.shopsphere.example/p31-main.jpg","isPrimary":1},{"productId":32,"url":"https://images.shopsphere.example/p32-main.jpg","isPrimary":1},{"productId":33,"url":"https://images.shopsphere.example/p33-main.jpg","isPrimary":1},{"productId":34,"url":"https://images.shopsphere.example/p34-main.jpg","isPrimary":1},{"productId":35,"url":"https://images.shopsphere.example/p35-main.jpg","isPrimary":1},{"productId":36,"url":"https://images.shopsphere.example/p36-main.jpg","isPrimary":1},{"productId":37,"url":"https://images.shopsphere.example/p37-main.jpg","isPrimary":1},{"productId":38,"url":"https://images.shopsphere.example/p38-main.jpg","isPrimary":1},{"productId":39,"url":"https://images.shopsphere.example/p39-main.jpg","isPrimary":1},{"productId":40,"url":"https://images.shopsphere.example/p40-main.jpg","isPrimary":1},{"productId":41,"url":"https://images.shopsphere.example/p41-main.jpg","isPrimary":1},{"productId":42,"url":"https://images.shopsphere.example/p42-main.jpg","isPrimary":1},{"productId":43,"url":"https://images.shopsphere.example/p43-main.jpg","isPrimary":1},{"productId":44,"url":"https://images.shopsphere.example/p44-main.jpg","isPrimary":1},{"productId":45,"url":"https://images.shopsphere.example/p45-main.jpg","isPrimary":1},{"productId":46,"url":"https://images.shopsphere.example/p46-main.jpg","isPrimary":1},{"productId":47,"url":"https://images.shopsphere.example/p47-main.jpg","isPrimary":1},{"productId":48,"url":"https://images.shopsphere.example/p48-main.jpg","isPrimary":1},{"productId":49,"url":"https://images.shopsphere.example/p49-main.jpg","isPrimary":1},{"productId":50,"url":"https://images.shopsphere.example/p50-main.jpg","isPrimary":1},{"productId":51,"url":"https://images.shopsphere.example/p51-main.jpg","isPrimary":1},{"productId":52,"url":"https://images.shopsphere.example/p52-main.jpg","isPrimary":1},{"productId":53,"url":"https://images.shopsphere.example/p53-main.jpg","isPrimary":1},{"productId":54,"url":"https://images.shopsphere.example/p54-main.jpg","isPrimary":1},{"productId":55,"url":"https://images.shopsphere.example/p55-main.jpg","isPrimary":1},{"productId":56,"url":"https://images.shopsphere.example/p56-main.jpg","isPrimary":1},{"productId":57,"url":"https://images.shopsphere.example/p57-main.jpg","isPrimary":1},{"productId":58,"url":"https://images.shopsphere.example/p58-main.jpg","isPrimary":1},{"productId":59,"url":"https://images.shopsphere.example/p59-main.jpg","isPrimary":1},{"productId":60,"url":"https://images.shopsphere.example/p60-main.jpg","isPrimary":1},{"productId":61,"url":"https://images.shopsphere.example/p61-main.jpg","isPrimary":1},{"productId":62,"url":"https://images.shopsphere.example/p62-main.jpg","isPrimary":1},{"productId":63,"url":"https://images.shopsphere.example/p63-main.jpg","isPrimary":1},{"productId":64,"url":"https://images.shopsphere.example/p64-main.jpg","isPrimary":1},{"productId":65,"url":"https://images.shopsphere.example/p65-main.jpg","isPrimary":1},{"productId":66,"url":"https://images.shopsphere.example/p66-main.jpg","isPrimary":1},{"productId":67,"url":"https://images.shopsphere.example/p67-main.jpg","isPrimary":1},{"productId":68,"url":"https://images.shopsphere.example/p68-main.jpg","isPrimary":1},{"productId":69,"url":"https://images.shopsphere.example/p69-main.jpg","isPrimary":1},{"productId":70,"url":"https://images.shopsphere.example/p70-main.jpg","isPrimary":1},{"productId":71,"url":"https://images.shopsphere.example/p71-main.jpg","isPrimary":1},{"productId":72,"url":"https://images.shopsphere.example/p72-main.jpg","isPrimary":1},{"productId":73,"url":"https://images.shopsphere.example/p73-main.jpg","isPrimary":1},{"productId":74,"url":"https://images.shopsphere.example/p74-main.jpg","isPrimary":1},{"productId":75,"url":"https://images.shopsphere.example/p75-main.jpg","isPrimary":1},{"productId":76,"url":"https://images.shopsphere.example/p76-main.jpg","isPrimary":1},{"productId":77,"url":"https://images.shopsphere.example/p77-main.jpg","isPrimary":1},{"productId":78,"url":"https://images.shopsphere.example/p78-main.jpg","isPrimary":1},{"productId":79,"url":"https://images.shopsphere.example/p79-main.jpg","isPrimary":1},{"productId":2,"url":"https://images.shopsphere.example/p2-alt.jpg","isPrimary":0},{"productId":3,"url":"https://images.shopsphere.example/p3-alt.jpg","isPrimary":0},{"productId":4,"url":"https://images.shopsphere.example/p4-alt.jpg","isPrimary":0},{"productId":10,"url":"https://images.shopsphere.example/p10-alt.jpg","isPrimary":0},{"productId":18,"url":"https://images.shopsphere.example/p18-alt.jpg","isPrimary":0},{"productId":25,"url":"https://images.shopsphere.example/p25-alt.jpg","isPrimary":0},{"productId":27,"url":"https://images.shopsphere.example/p27-alt.jpg","isPrimary":0},{"productId":30,"url":"https://images.shopsphere.example/p30-alt.jpg","isPrimary":0},{"productId":33,"url":"https://images.shopsphere.example/p33-alt.jpg","isPrimary":0},{"productId":43,"url":"https://images.shopsphere.example/p43-alt.jpg","isPrimary":0},{"productId":44,"url":"https://images.shopsphere.example/p44-alt.jpg","isPrimary":0},{"productId":45,"url":"https://images.shopsphere.example/p45-alt.jpg","isPrimary":0},{"productId":49,"url":"https://images.shopsphere.example/p49-alt.jpg","isPrimary":0},{"productId":50,"url":"https://images.shopsphere.example/p50-alt.jpg","isPrimary":0},{"productId":59,"url":"https://images.shopsphere.example/p59-alt.jpg","isPrimary":0},{"productId":64,"url":"https://images.shopsphere.example/p64-alt.jpg","isPrimary":0}],"reviews":[{"productId":1,"customerId":1,"rating":5,"comment":"Great sound and battery life"},{"productId":6,"customerId":2,"rating":4,"comment":"Good fit, fabric is soft"},{"productId":8,"customerId":2,"rating":5,"comment":"Lovely print and comfortable"},{"productId":3,"customerId":3,"rating":4,"comment":"Fast and light for daily work"},{"productId":10,"customerId":4,"rating":5,"comment":"Cooks evenly and cleans easily"},{"productId":11,"customerId":4,"rating":3,"comment":"Works fine but a bit noisy"},{"productId":17,"customerId":5,"rating":4,"comment":"Comfortable for long runs"},{"productId":16,"customerId":5,"rating":2,"comment":"Too thin for my liking"},{"productId":4,"customerId":7,"rating":5,"comment":"Excellent performance for the price"},{"productId":8,"customerId":8,"rating":4,"comment":"Good quality cotton"},{"productId":18,"customerId":9,"rating":3,"comment":"Locking mechanism feels loose"},{"productId":1,"customerId":10,"rating":4,"comment":"Nice, but the case is a little bulky"},{"productId":5,"customerId":1,"rating":5,"comment":"Smooth and quiet clicks"},{"productId":2,"customerId":1,"rating":4,"comment":"Smooth display and a decent camera"},{"productId":7,"customerId":11,"rating":3,"comment":"Runs slightly small"}]};
+
+// ---------- small helpers ----------
+const $ = s => document.querySelector(s);
+const by = a => Object.fromEntries(a.map(x => [x.id, x]));
+const clone = x => JSON.parse(JSON.stringify(x));
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const money = n => {
+  const r = Math.round(n * 100) / 100;
+  return 'Rs ' + (r % 1 === 0 ? r.toLocaleString('en-US') : r.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+};
+const fmtDate = d => new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+const ico = (paths, size) => '<svg viewBox="0 0 24 24" width="' + (size || 24) + '" height="' + (size || 24) + '" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + paths + '</svg>';
+
+const cats = by(DB.categories), sellers = by(DB.sellers), prods = by(DB.products), vars = by(DB.variants), custs = by(DB.customers);
+const imgs = {};
+DB.images.forEach(i => (imgs[i.productId] = imgs[i.productId] || []).push(i));
+// Pictures live in the images folder next to this page. A product's picture is images/ plus the file name saved in the ProductImage table.
+const imagesOf = pid => (imgs[pid] || []).slice().sort((a, b) => b.isPrimary - a.isPrimary).map(i => 'images/' + String(i.url).split('/').pop());
+// Demo only: sample accounts share this password. The real app checks a hashed password in the backend.
+const DEMO_PASSWORD = 'shop1234';
+const METHODS = ['Credit Card', 'JazzCash', 'Easypaisa', 'Cash on Delivery', 'Bank Transfer'];
+const COLORS = { 'Electronics': '#2F4B9B', 'Fashion': '#B23A5A', 'Home & Kitchen': '#52702F', 'Books': '#6B3FA0', 'Sports & Outdoors': '#B8501A', 'Beauty & Personal Care': '#0E7C7B', 'Bath & Body': '#8A6A1F' };
+const SORTS = [['featured', 'Featured'], ['price-asc', 'Price, low to high'], ['price-desc', 'Price, high to low'], ['rating', 'Top rated']];
+
+// ---------- page state (everything the page remembers) ----------
+const state = {
+  customerId: null, view: 'home', query: '', cat: 0, sort: 'featured',
+  carts: clone(DB.carts), wish: clone(DB.wishlist),
+  orders: clone(DB.orders), items: clone(DB.orderItems), payments: clone(DB.payments), shipments: clone(DB.shipments),
+  reviews: clone(DB.reviews), addresses: clone(DB.addresses),
+  stock: Object.fromEntries(DB.variants.map(v => [v.id, v.stock])),
+  passwords: Object.fromEntries(DB.customers.map(c => [c.id, DEMO_PASSWORD])), form: {},
+  coupon: null, couponInput: '', couponMsg: '',
+  menuOpen: {}, overlay: null, modal: null, checkout: null, confirmId: null
+};
+
+const cartOf = id => (state.carts[id] = state.carts[id] || []);
+const wishOf = id => (state.wish[id] = state.wish[id] || []);
+
+// ---------- categories ----------
+// One Category table holds everything. A category with no parent is a main category (Electronics).
+// A category with a parent is a subcategory (Mobiles belongs to Electronics).
+// Every product points to exactly one category, usually the most specific one (the earbuds point to Mobiles).
+const topOf = id => { let c = cats[id]; while (c.parentId) c = cats[c.parentId]; return c; };
+const inCat = (cid, root) => { let c = cats[cid]; while (c) { if (c.id === root) return true; c = c.parentId ? cats[c.parentId] : null; } return false; };
+const catPath = cid => { const out = []; let c = cats[cid]; while (c) { out.unshift(c.name); c = c.parentId ? cats[c.parentId] : null; } return out; };
+
+// ---------- products ----------
+const colorOf = p => COLORS[topOf(p.categoryId).name] || '#12343B';
+const variantsOf = pid => DB.variants.filter(v => v.productId === pid);
+const stockOf = p => variantsOf(p.id).reduce((s, v) => s + state.stock[v.id], 0);
+const priceOf = p => { const vs = variantsOf(p.id); return vs.length ? Math.min.apply(null, vs.map(v => v.price)) : p.basePrice; };
+const initials = n => n.split(/\s+/).filter(w => /^[A-Za-z]/.test(w)).slice(0, 2).map(w => w[0].toUpperCase()).join('');
+const vLabel = v => {
+  const parts = [];
+  if (v.size && v.size !== 'Standard' && v.size !== 'N/A') parts.push(v.size);
+  if (v.color && v.color !== 'N/A') parts.push(v.color);
+  return parts.join(', ') || 'Standard';
+};
+const ratingOf = pid => {
+  const r = state.reviews.filter(x => x.productId === pid);
+  return { n: r.length, avg: r.length ? r.reduce((s, x) => s + x.rating, 0) / r.length : 0 };
+};
+const PIC = src => '<img class="pic" src="' + esc(src) + '" alt="" loading="lazy" onerror="this.remove()">';
+const stars = a => '★'.repeat(Math.round(a)) + '☆'.repeat(5 - Math.round(a));
+const addressOf = id => state.addresses.find(a => a.id === id);
+
+function soldByProduct() {
+  const live = new Set(state.orders.filter(o => o.status !== 'Cancelled').map(o => o.id));
+  const sold = {};
+  state.items.forEach(i => { if (live.has(i.orderId)) { const pid = vars[i.variantId].productId; sold[pid] = (sold[pid] || 0) + i.qty; } });
+  return sold;
+}
+// Similar products: same category first, then the rest of the same main category, best rated first.
+function similarTo(p) {
+  const top = topOf(p.categoryId).id;
+  return DB.products.filter(x => x.id !== p.id && topOf(x.categoryId).id === top)
+    .map(x => ({ x: x, score: (x.categoryId === p.categoryId ? 2 : 0) + ratingOf(x.id).avg / 10 }))
+    .sort((a, b) => b.score - a.score || a.x.name.localeCompare(b.x.name)).slice(0, 4).map(o => o.x);
+}
+
+function cartLines() {
+  return cartOf(state.customerId).map(l => {
+    const v = vars[l.variantId];
+    return { variantId: l.variantId, qty: l.qty, v: v, p: prods[v.productId], price: v.price };
+  });
+}
+function totals(lines, coupon) {
+  const sub = lines.reduce((s, l) => s + l.qty * l.price, 0);
+  const disc = coupon ? (coupon.type === 'Percentage' ? sub * coupon.value / 100 : Math.min(coupon.value, sub)) : 0;
+  return { sub: sub, disc: disc, total: sub - disc };
+}
+
+// ---------- cards ----------
+const HEART = '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>';
+function cardHTML(p, note) {
+  const r = ratingOf(p.id), wished = !!state.customerId && wishOf(state.customerId).includes(p.id), first = imagesOf(p.id)[0];
+  return '<article class="card">' +
+    '<button class="card-main" data-act="open" data-id="' + p.id + '">' +
+      '<span class="tile" style="background:' + colorOf(p) + '">' + esc(initials(p.name)) + (first ? PIC(first) : '') +
+        (stockOf(p) < 10 ? '<span class="badge-low">Low stock</span>' : '') +
+        '<span class="tag">' + money(priceOf(p)) + '</span></span>' +
+      '<span class="card-body">' +
+        '<span class="card-name">' + esc(p.name) + '</span>' +
+        '<span class="card-meta">' + esc(cats[p.categoryId].name) + ', sold by ' + esc(sellers[p.sellerId].name) + '</span>' +
+        '<span class="rating">' + (r.n ? '<span aria-hidden="true">' + stars(r.avg) + '</span> ' + r.avg.toFixed(1) + ' (' + r.n + ' review' + (r.n > 1 ? 's' : '') + ')' : 'No reviews yet') + '</span>' +
+        (note ? '<span class="note">' + esc(note) + '</span>' : '') +
+      '</span></button>' +
+    '<button class="heart' + (wished ? ' on' : '') + '" data-act="wish" data-id="' + p.id + '" aria-pressed="' + wished + '" aria-label="' + (wished ? 'Remove from' : 'Save to') + ' wishlist: ' + esc(p.name) + '">' + HEART + '</button>' +
+  '</article>';
+}
+
+// ---------- home ----------
+const PERKS = [
+  [ico('<rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/>'), 'Pay your way', 'Card, JazzCash, Easypaisa, bank transfer or cash on delivery'],
+  [ico('<path d="M21 8l-9-5-9 5v8l9 5 9-5z"/><path d="M3 8l9 5 9-5M12 13v8"/>'), 'Follow your order', 'See the payment and shipment status of every order'],
+  [ico('<path d="M20 12l-8 8-9-9V3h8z"/><circle cx="7.5" cy="7.5" r="1.5"/>'), 'Coupon codes', 'Add a code at checkout to save on your order'],
+  [ico('<path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9z"/>'), 'Read the reviews', 'See what other shoppers think on every product page']
+];
+function homeView() {
+  const sold = soldByProduct();
+  const popular = DB.products.filter(p => sold[p.id]).sort((a, b) => sold[b.id] - sold[a.id] || a.name.localeCompare(b.name)).slice(0, 4);
+  const best = DB.products.map(p => ({ p: p, r: ratingOf(p.id) })).filter(o => o.r.n > 0)
+    .sort((a, b) => b.r.avg - a.r.avg || b.r.n - a.r.n || a.p.name.localeCompare(b.p.name)).slice(0, 4).map(o => o.p);
+  const band = (title, sub, list, note) => list.length ? '<section class="band"><div class="band-head"><h2>' + title + '</h2><p>' + sub + '</p></div><div class="grid">' + list.map(p => cardHTML(p, note ? note(p) : '')).join('') + '</div></section>' : '';
+  return '<section class="hero"><div><h1>Everything you need, one cart away</h1>' +
+    '<div class="row"><button class="btn primary big" data-act="nav" data-view="shop">Start shopping</button><button class="btn big" data-act="menu-open">Browse categories</button></div></div>' +
+    '<div class="hero-art"><img src="images/hero.jpg" alt="" onerror="this.closest(\'.hero\').classList.add(\'no-art\');this.parentNode.remove()"></div></section>' +
+    '<div class="perks">' + PERKS.map(k => '<div class="perk">' + k[0] + '<div><b>' + k[1] + '</b><span>' + k[2] + '</span></div></div>').join('') + '</div>' +
+    band('Most ordered', 'What shoppers buy the most', popular, p => sold[p.id] + ' sold') +
+    band('Top rated', 'The products shoppers rated highest', best) +
+    '<section class="cta"><h2>Ready to look around?</h2><p>See every product, or start from a category.</p>' +
+    '<div class="row"><button class="btn primary big" data-act="nav" data-view="shop">See all products</button><button class="btn light big" data-act="menu-open">Browse categories</button></div></section>';
+}
+
+// ---------- shop ----------
+function visibleProducts() {
+  const q = state.query.trim().toLowerCase();
+  const list = DB.products.filter(p => {
+    if (state.cat && !inCat(p.categoryId, state.cat)) return false;
+    if (!q) return true;
+    return p.name.toLowerCase().includes(q) || (p.description || '').toLowerCase().includes(q);
+  });
+  if (state.sort === 'price-asc') list.sort((a, b) => priceOf(a) - priceOf(b));
+  else if (state.sort === 'price-desc') list.sort((a, b) => priceOf(b) - priceOf(a));
+  else if (state.sort === 'rating') list.sort((a, b) => ratingOf(b.id).avg - ratingOf(a.id).avg);
+  return list;
+}
+function shopView() {
+  const list = visibleProducts(), q = state.query.trim();
+  const path = state.cat ? catPath(state.cat) : [];
+  const title = q && !state.cat ? 'Search results' : state.cat ? path[path.length - 1] : 'All products';
+  const sortSel = SORTS.map(s => '<option value="' + s[0] + '"' + (state.sort === s[0] ? ' selected' : '') + '>' + s[1] + '</option>').join('');
+  const filters = (state.cat ? '<button class="pill-btn" data-act="clear-cat" aria-label="Remove category filter">' + esc(path.join(' / ')) + ' ×</button>' : '') +
+    (q ? '<button class="pill-btn" data-act="clear-q" aria-label="Remove search filter">“' + esc(q) + '” ×</button>' : '');
+  return '<div class="shop-head">' + (path.length > 1 ? '<p class="crumb">' + esc(path.slice(0, -1).join(' / ')) + '</p>' : '') + '<h1>' + esc(title) + '</h1>' + (filters ? '<div class="filters">' + filters + '</div>' : '') + '</div>' +
+    '<div class="toolbar">' + (state.cat || q ? '<p class="count">' + list.length + ' product' + (list.length === 1 ? '' : 's') + '</p>' : '<span></span>') +
+    '<label>Sort by <select data-bind="sort">' + sortSel + '</select></label></div>' +
+    (list.length ? '<div class="grid">' + list.map(p => cardHTML(p)).join('') + '</div>' :
+      '<div class="empty"><h2>No products found</h2><p>Try a shorter word or pick another category.</p><button class="btn" data-act="clear">Clear search and filters</button></div>');
+}
+
+// ---------- wishlist, orders, profile ----------
+const guestPrompt = (title, msg) => '<div class="empty"><h2>' + title + '</h2><p>' + msg + '</p><button class="btn primary" data-act="login-open">Log in</button> <button class="btn" data-act="signup-open">Create an account</button></div>';
+function wishView() {
+  if (!state.customerId) return guestPrompt('Log in to use your wishlist', 'Saved products are kept in your account.');
+  const ids = wishOf(state.customerId);
+  if (!ids.length) return '<div class="empty"><h2>Your wishlist is empty</h2><p>Tap the heart on any product to save it here.</p><button class="btn primary" data-act="nav" data-view="shop">Browse the shop</button></div>';
+  return '<div class="shop-head"><h1>Wishlist</h1></div><div class="toolbar"><p class="count">' + ids.length + ' saved product' + (ids.length === 1 ? '' : 's') + '</p></div><div class="grid">' + ids.map(id => cardHTML(prods[id])).join('') + '</div>';
+}
+function ordersView() {
+  if (!state.customerId) return guestPrompt('Log in to see your orders', 'Your orders are kept in your account.');
+  const mine = state.orders.filter(o => o.customerId === state.customerId).sort((a, b) => b.date.localeCompare(a.date));
+  if (!mine.length) return '<div class="empty"><h2>No orders yet</h2><p>' + esc(custs[state.customerId].name) + ' has not placed an order. Add something to the cart and check out.</p><button class="btn primary" data-act="nav" data-view="shop">Browse the shop</button></div>';
+  return '<div class="shop-head"><h1>My orders</h1></div>' + mine.map(o => {
+    const its = state.items.filter(i => i.orderId === o.id);
+    const pays = state.payments.filter(p => p.orderId === o.id);
+    const ship = state.shipments.find(s => s.orderId === o.id);
+    const addr = ship ? addressOf(ship.addressId) : null;
+    const coupon = o.couponId ? DB.coupons.find(c => c.id === o.couponId) : null;
+    const sub = its.reduce((s, i) => s + i.qty * i.unitPrice, 0);
+    const rows = its.map(i => { const v = vars[i.variantId]; return '<tr><td>' + esc(prods[v.productId].name) + '<br><small>' + esc(vLabel(v)) + '</small></td><td class="r">' + i.qty + '</td><td class="r">' + money(i.unitPrice) + '</td><td class="r">' + money(i.qty * i.unitPrice) + '</td></tr>'; }).join('');
+    return '<section class="order"><div class="order-head"><h2>Order ' + o.id + '</h2><span>' + fmtDate(o.date) + ' <span class="chip s-' + o.status + '">' + o.status + '</span></span></div>' +
+      '<table><thead><tr><th>Item</th><th class="r">Qty</th><th class="r">Price</th><th class="r">Total</th></tr></thead><tbody>' + rows + '</tbody></table>' +
+      '<div class="facts">' +
+        (coupon ? '<div>Coupon ' + esc(coupon.code) + ' saved you ' + money(sub - o.total) + '</div>' : '') +
+        '<div><b>Order total: ' + money(o.total) + '</b></div>' +
+        pays.map(p => '<div>Payment: ' + esc(p.method) + ', ' + money(p.amount) + ' <span class="chip s-' + p.status + '">' + p.status + '</span></div>').join('') +
+        (ship ? '<div>Shipment: <span class="chip s-' + ship.status + '">' + ship.status + '</span>' + (ship.carrier ? ' with ' + esc(ship.carrier) + ', tracking ' + esc(ship.tracking) : '') + (ship.delivered ? ', delivered ' + fmtDate(ship.delivered) : '') + '</div>' : '') +
+        (addr ? '<div>Ship to: ' + esc(addr.line1) + ', ' + esc(addr.city) + '</div>' : '') +
+      '</div>' +
+      ((o.status === 'Pending' || o.status === 'Processing') ? '<div class="row"><button class="btn danger" data-act="cancel-order" data-id="' + o.id + '">Cancel order</button></div>' : '') +
+    '</section>';
+  }).join('');
+}
+function profileView() {
+  const cid = state.customerId, c = custs[cid];
+  const addrs = state.addresses.filter(a => a.customerId === cid);
+  return '<section class="profile"><div class="profile-head"><span class="avatar-big" aria-hidden="true">' + esc(c.name[0].toUpperCase()) + '</span><div><h1>' + esc(c.name) + '</h1><p class="muted">' + esc(c.email) + (c.phone ? ', ' + esc(c.phone) : '') + '</p></div></div>' +
+    '<div class="stats"><div><b>' + state.orders.filter(o => o.customerId === cid).length + '</b><span>Orders</span></div><div><b>' + wishOf(cid).length + '</b><span>Wishlist</span></div><div><b>' + state.reviews.filter(r => r.customerId === cid).length + '</b><span>Reviews</span></div></div>' +
+    '<h2>Saved addresses</h2>' + (addrs.length ? addrs.map(a => '<div class="addr">' + esc(a.line1) + ', ' + esc(a.city) + (a.postalCode ? ' ' + esc(a.postalCode) : '') + ', ' + esc(a.country) + '</div>').join('') : '<p class="muted">No saved address yet. You can add one at checkout.</p>') +
+    '<div class="row" style="margin-top:20px"><button class="btn danger" data-act="logout">Log out</button></div></section>';
+}
+
+// ---------- overlays ----------
+function productDialog() {
+  const m = state.modal, p = prods[m.pid], vs = variantsOf(p.id), v = vars[m.vid], left = state.stock[v.id];
+  const r = ratingOf(p.id), s = sellers[p.sellerId], pics = imagesOf(p.id), similar = similarTo(p);
+  const reviews = state.reviews.filter(x => x.productId === p.id);
+  const mine = reviews.some(x => x.customerId === state.customerId);
+  const wished = !!state.customerId && wishOf(state.customerId).includes(p.id);
+  const opts = vs.map(x => {
+    const n = state.stock[x.id];
+    return '<button class="opt" data-act="variant" data-id="' + x.id + '" aria-pressed="' + (x.id === m.vid) + '"' + (n === 0 ? ' disabled' : '') + '>' + esc(vLabel(x)) + '<small>' + money(x.price) + (n === 0 ? ', sold out' : '') + '</small></button>';
+  }).join('');
+  const stockText = left === 0 ? 'Sold out' : left < 10 ? 'Only ' + left + ' left' : left + ' in stock';
+  const revList = reviews.length ? reviews.map(x => '<div class="review"><span aria-hidden="true" style="color:var(--saffron-deep)">' + stars(x.rating) + '</span> <span class="sr">' + x.rating + ' out of 5</span> <b>' + esc(custs[x.customerId].name) + '</b><br>' + esc(x.comment) + '</div>').join('') : '<p class="muted">No reviews yet. Be the first to write one.</p>';
+  const form = !state.customerId ? '<p class="muted">Log in to write a review.</p><button class="btn" data-act="login-open">Log in</button>' : mine ? '<p class="muted">You have already reviewed this product.</p>' :
+    '<div class="field"><label for="rev-rating"><span>Your rating</span></label><select id="rev-rating" data-bind="modal.rating"><option value="">Choose a rating</option>' +
+      [5, 4, 3, 2, 1].map(n => '<option value="' + n + '"' + (String(m.rating) === String(n) ? ' selected' : '') + '>' + n + ' out of 5</option>').join('') + '</select></div>' +
+    '<div class="field"><label for="rev-text"><span>Your review</span></label><textarea id="rev-text" rows="3" data-bind="modal.text">' + esc(m.text) + '</textarea></div>' +
+    (m.reviewError ? '<p class="err">' + esc(m.reviewError) + '</p>' : '') +
+    '<button class="btn" data-act="review">Post review</button>';
+  return '<div class="backdrop" data-act="backdrop"><section class="dialog" role="dialog" aria-modal="true" aria-labelledby="dlg-title" tabindex="-1">' +
+    '<button class="x" data-act="close" aria-label="Close">×</button>' +
+    '<div class="dlg-grid"><div class="dlg-media"><div class="dlg-tile" style="background:' + colorOf(p) + '">' + esc(initials(p.name)) + (pics[m.img] ? PIC(pics[m.img]) : '') + '</div>' +
+    (pics.length > 1 ? '<div class="thumbs">' + pics.map((src, i) => '<button class="thumb" data-act="thumb" data-id="' + i + '" aria-pressed="' + (i === m.img) + '" aria-label="Picture ' + (i + 1) + ' of ' + pics.length + '"><img src="' + esc(src) + '" alt="" onerror="this.parentNode.remove()"></button>').join('') + '</div>' : '') + '</div>' +
+    '<div class="dlg-info"><h2 id="dlg-title">' + esc(p.name) + '</h2>' +
+      '<p class="muted">' + esc(catPath(p.categoryId).join(' / ')) + ', sold by ' + esc(s.name) + ' (seller rating ' + Number(s.rating).toFixed(1) + ')</p>' +
+      '<p class="rating">' + (r.n ? '<span aria-hidden="true">' + stars(r.avg) + '</span> ' + r.avg.toFixed(1) + ' from ' + r.n + ' review' + (r.n > 1 ? 's' : '') : 'No reviews yet') + '</p>' +
+      '<p>' + esc(p.description) + '</p>' +
+      '<fieldset><legend>Choose a style</legend><div class="opts">' + opts + '</div></fieldset>' +
+      '<p class="stock' + (left < 10 ? ' low' : '') + '">' + stockText + ' <span class="muted">(code ' + esc(v.sku) + ')</span></p>' +
+      '<div class="row"><div class="stepper" role="group" aria-label="Quantity"><button data-act="qty-dec" aria-label="Decrease quantity">−</button><span>' + m.qty + '</span><button data-act="qty-inc" aria-label="Increase quantity">+</button></div>' +
+      '<button class="btn primary" data-act="add"' + (left === 0 ? ' disabled' : '') + '>Add to cart, ' + money(v.price * m.qty) + '</button>' +
+      '<button class="btn" data-act="wish" data-id="' + p.id + '" aria-pressed="' + wished + '">' + (wished ? 'Remove from wishlist' : 'Save to wishlist') + '</button></div>' +
+    '</div></div>' +
+    (similar.length ? '<div class="similar"><h3>You may also like</h3><div class="grid small">' + similar.map(x => cardHTML(x)).join('') + '</div></div>' : '') +
+    '<div class="reviews"><h3>Reviews</h3>' + revList + '<div style="margin-top:14px">' + (state.customerId ? '<b>Write a review as ' + esc(custs[state.customerId].name) + '</b>' : '') + form + '</div></div>' +
+  '</section></div>';
+}
+
+function cartDrawer() {
+  const lines = cartLines(), t = totals(lines, state.coupon);
+  const body = lines.length ? lines.map(l =>
+    '<div class="line"><div><div class="name">' + esc(l.p.name) + '</div><div class="muted">' + esc(vLabel(l.v)) + ', ' + money(l.price) + ' each</div></div><div><b>' + money(l.qty * l.price) + '</b></div>' +
+    '<div class="controls"><div class="stepper" role="group" aria-label="Quantity of ' + esc(l.p.name) + '"><button data-act="line-dec" data-id="' + l.variantId + '" aria-label="Decrease quantity">−</button><span>' + l.qty + '</span><button data-act="line-inc" data-id="' + l.variantId + '" aria-label="Increase quantity">+</button></div>' +
+    '<button class="link" data-act="line-remove" data-id="' + l.variantId + '">Remove</button></div></div>').join('') :
+    '<div class="empty" style="margin:32px auto"><h2>Your cart is empty</h2><p>Browse the shop and add something you like.</p><button class="btn primary" data-act="close">Keep shopping</button></div>';
+  const coupon = !lines.length ? '' : state.coupon ?
+    '<p class="ok">Code ' + esc(state.coupon.code) + ' applied (' + (state.coupon.type === 'Percentage' ? state.coupon.value + '% off' : money(state.coupon.value) + ' off') + ') <button class="link" data-act="coupon-remove">Remove code</button></p>' :
+    '<div class="coupon"><label class="sr" for="coupon-in">Coupon code</label><input id="coupon-in" placeholder="Coupon code" data-bind="couponInput" value="' + esc(state.couponInput) + '"><button class="btn" data-act="coupon-apply">Apply code</button></div>' + (state.couponMsg ? '<p class="err">' + esc(state.couponMsg) + '</p>' : '');
+  return '<div class="backdrop side" data-act="backdrop"><aside class="drawer" role="dialog" aria-modal="true" aria-labelledby="cart-title" tabindex="-1">' +
+    '<button class="x" data-act="close" aria-label="Close cart">×</button><h2 id="cart-title">Your cart</h2>' + body + coupon +
+    (lines.length ? '<div class="sum"><div><span>Subtotal</span><span>' + money(t.sub) + '</span></div>' + (t.disc ? '<div><span>Discount</span><span>−' + money(t.disc) + '</span></div>' : '') + '<div class="total"><span>Total</span><span>' + money(t.total) + '</span></div></div>' +
+      '<button class="btn primary" style="width:100%" data-act="checkout-open">Go to checkout</button>' : '') +
+  '</aside></div>';
+}
+
+function checkoutDialog() {
+  const c = state.checkout, t = totals(cartLines(), state.coupon);
+  const mine = state.addresses.filter(a => a.customerId === state.customerId);
+  const picks = mine.map(a => '<label class="pick"><input type="radio" name="addr" data-bind="checkout.addressId" value="' + a.id + '"' + (String(c.addressId) === String(a.id) ? ' checked' : '') + '><span>' + esc(a.line1) + ', ' + esc(a.city) + (a.postalCode ? ' ' + esc(a.postalCode) : '') + '</span></label>').join('') +
+    '<label class="pick"><input type="radio" name="addr" data-bind="checkout.addressId" value="new"' + (c.addressId === 'new' ? ' checked' : '') + '><span>Use a new address</span></label>';
+  const newAddr = c.addressId === 'new' ?
+    '<div class="field"><label for="a1"><span>Street address</span></label><input id="a1" data-bind="checkout.line1" value="' + esc(c.line1) + '"></div>' +
+    '<div class="field"><label for="a2"><span>City</span></label><input id="a2" data-bind="checkout.city" value="' + esc(c.city) + '"></div>' +
+    '<div class="field"><label for="a3"><span>Postal code</span></label><input id="a3" data-bind="checkout.postal" value="' + esc(c.postal) + '"></div>' +
+    '<div class="field"><label for="a4"><span>Country</span></label><input id="a4" data-bind="checkout.country" value="' + esc(c.country) + '"></div>' : '';
+  const methods = METHODS.map(m => '<option' + (c.method === m ? ' selected' : '') + '>' + m + '</option>').join('');
+  return '<div class="backdrop" data-act="backdrop"><section class="dialog narrow" role="dialog" aria-modal="true" aria-labelledby="co-title" tabindex="-1">' +
+    '<button class="x" data-act="close" aria-label="Close">×</button><h2 id="co-title" style="margin-bottom:12px">Checkout</h2>' +
+    '<fieldset><legend>Where should we send it?</legend>' + picks + '</fieldset>' + newAddr +
+    '<div class="field"><label for="pay"><span>Payment method</span></label><select id="pay" data-bind="checkout.method">' + methods + '</select></div>' +
+    '<div class="sum"><div class="total"><span>Total to pay</span><span>' + money(t.total) + '</span></div></div>' +
+    (c.error ? '<p class="err">' + esc(c.error) + '</p>' : '') +
+    '<button class="btn primary" style="width:100%" data-act="place">Place order</button></section></div>';
+}
+
+function confirmDialog() {
+  const o = state.orders.find(x => x.id === state.confirmId), pay = state.payments.find(p => p.orderId === o.id);
+  const ship = state.shipments.find(s => s.orderId === o.id), a = addressOf(ship.addressId);
+  return '<div class="backdrop" data-act="backdrop"><section class="dialog narrow" role="dialog" aria-modal="true" aria-labelledby="ok-title" tabindex="-1">' +
+    '<h2 id="ok-title" style="margin-bottom:8px">Order ' + o.id + ' placed</h2>' +
+    '<p>Total ' + money(o.total) + ', paid by ' + esc(pay.method) + ' (' + pay.status.toLowerCase() + '). We will send it to ' + esc(a.line1) + ', ' + esc(a.city) + '.</p>' +
+    '<div class="row"><button class="btn primary" data-act="go-orders">View my orders</button><button class="btn" data-act="close">Keep shopping</button></div></section></div>';
+}
+
+// The menu lists the main categories. A main category with subcategories opens as a dropdown.
+const CHEVRON = '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>';
+function menuDrawer() {
+  const tops = DB.categories.filter(c => !c.parentId);
+  const kidsOf = id => DB.categories.filter(s => s.parentId === id).sort((a, b) => a.name.localeCompare(b.name));
+  const here = id => state.view === 'shop' && state.cat === id && !state.query.trim();
+  const leaf = (id, label, cls) => '<button class="' + cls + '" data-act="menu-cat" data-id="' + id + '"' + (here(id) ? ' aria-current="true"' : '') + '><span>' + esc(label) + '</span></button>';
+  const list = leaf(0, 'All products', '') + tops.map(c => {
+    const kids = kidsOf(c.id);
+    if (!kids.length) return leaf(c.id, c.name, '');
+    const open = !!state.menuOpen[c.id];
+    return '<button class="parent" data-act="menu-toggle" data-id="' + c.id + '" aria-expanded="' + open + '" aria-controls="sub-' + c.id + '"><span>' + esc(c.name) + '</span>' + CHEVRON + '</button>' +
+      '<div class="subs" id="sub-' + c.id + '"' + (open ? '' : ' hidden') + '>' + leaf(c.id, 'All ' + c.name, 'sub') + kids.map(k => leaf(k.id, k.name, 'sub')).join('') + '</div>';
+  }).join('');
+  return '<div class="backdrop side left" data-act="backdrop"><aside class="drawer left" role="dialog" aria-modal="true" aria-label="Menu" tabindex="-1">' +
+    '<button class="x" data-act="close" aria-label="Close menu">×</button><h2>Shop by category</h2><nav class="menu-list" aria-label="Categories">' + list + '</nav></aside></div>';
+}
+
+function loginDialog() {
+  const f = state.form;
+  return '<div class="backdrop" data-act="backdrop"><section class="dialog narrow" role="dialog" aria-modal="true" aria-labelledby="li-title" tabindex="-1">' +
+    '<button class="x" data-act="close" aria-label="Close">×</button><h2 id="li-title" style="margin-bottom:6px">Log in</h2>' +
+    (f.notice ? '<p class="muted">' + esc(f.notice) + '</p>' : '') +
+    '<div class="field"><label for="li-email"><span>Email</span></label><input id="li-email" type="email" autocomplete="email" data-enter data-bind="form.email" value="' + esc(f.email) + '"></div>' +
+    '<div class="field"><label for="li-pass"><span>Password</span></label><input id="li-pass" type="password" autocomplete="current-password" data-enter data-bind="form.password" value="' + esc(f.password) + '"></div>' +
+    (f.error ? '<p class="err">' + esc(f.error) + '</p>' : '') +
+    '<button class="btn primary" style="width:100%;margin-top:6px" data-primary data-act="login">Log in</button>' +
+    '<p class="muted" style="margin-top:14px">New to ShopSphere? <button class="link" data-act="signup-open">Create an account</button></p>' +
+    '<p class="muted">Demo mode: every sample account uses the password ' + DEMO_PASSWORD + '. The real login will be checked by the backend.</p></section></div>';
+}
+function signupDialog() {
+  const f = state.form;
+  const fld = (id, label, type, bind, auto) => '<div class="field"><label for="' + id + '"><span>' + label + '</span></label><input id="' + id + '" type="' + type + '" autocomplete="' + auto + '" data-enter data-bind="form.' + bind + '" value="' + esc(f[bind]) + '"></div>';
+  return '<div class="backdrop" data-act="backdrop"><section class="dialog narrow" role="dialog" aria-modal="true" aria-labelledby="su-title" tabindex="-1">' +
+    '<button class="x" data-act="close" aria-label="Close">×</button><h2 id="su-title" style="margin-bottom:6px">Create your account</h2>' +
+    fld('su-name', 'Full name', 'text', 'name', 'name') + fld('su-email', 'Email', 'email', 'email', 'email') + fld('su-phone', 'Phone (optional)', 'tel', 'phone', 'tel') +
+    fld('su-pass', 'Password (at least 8 characters)', 'password', 'password', 'new-password') + fld('su-confirm', 'Confirm password', 'password', 'confirm', 'new-password') +
+    (f.error ? '<p class="err">' + esc(f.error) + '</p>' : '') +
+    '<button class="btn primary" style="width:100%;margin-top:6px" data-primary data-act="signup">Create account</button>' +
+    '<p class="muted" style="margin-top:14px">Already have an account? <button class="link" data-act="login-open">Log in</button></p></section></div>';
+}
+
+// ---------- drawing the page ----------
+let lastOverlayKey = '';
+function render() {
+  const cid = state.customerId, active = document.activeElement;
+  const keep = active && active.dataset && active.dataset.act ? '[data-act="' + active.dataset.act + '"]' + (active.dataset.id ? '[data-id="' + active.dataset.id + '"]' : '') : null;
+  // top right: profile badge (name shows on hover) and cart count
+  const name = cid ? custs[cid].name : '';
+  $('#account').innerHTML = cid ?
+    '<button class="badge in" data-act="profile-open" aria-label="Profile: ' + esc(name) + '">' + esc(name[0].toUpperCase()) + '<span class="tip" aria-hidden="true">' + esc(name) + '</span></button>' :
+    '<button class="badge" data-act="login-open" aria-label="Log in">' + ico('<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/>', 22) + '<span class="tip" aria-hidden="true">Log in</span></button>';
+  const cartN = cid ? cartOf(cid).reduce((s, l) => s + l.qty, 0) : 0, wishN = cid ? wishOf(cid).length : 0;
+  $('#n-cart').hidden = cartN === 0; $('#n-cart').textContent = cartN;
+  $('#n-wish').hidden = wishN === 0; $('#n-wish').textContent = wishN;
+  document.querySelectorAll('.dock [data-view]').forEach(b => b.setAttribute('aria-current', (b.dataset.view === state.view || (b.dataset.view === 'home' && state.view === 'shop')) ? 'page' : 'false'));
+  $('.dock [data-act="profile-open"]').setAttribute('aria-current', state.view === 'profile' ? 'page' : 'false');
+  const views = { home: homeView, shop: shopView, wishlist: wishView, orders: ordersView, profile: profileView };
+  $('#main').innerHTML = (views[state.view] || homeView)();
+  // overlays (keep the scroll position while the same dialog is redrawn)
+  const key = state.overlay ? state.overlay + (state.modal ? state.modal.pid : '') : '';
+  const ov = $('#overlay'), oldBox = ov.querySelector('[tabindex="-1"]');
+  const keepTop = oldBox && key && key === lastOverlayKey ? oldBox.scrollTop : 0;
+  ov.innerHTML = state.overlay === 'product' ? productDialog() : state.overlay === 'cart' ? cartDrawer() : state.overlay === 'checkout' ? checkoutDialog() : state.overlay === 'confirm' ? confirmDialog() : state.overlay === 'menu' ? menuDrawer() : state.overlay === 'login' ? loginDialog() : state.overlay === 'signup' ? signupDialog() : '';
+  document.body.classList.toggle('locked', !!state.overlay);
+  const box = ov.querySelector('[tabindex="-1"]');
+  if (box && keepTop) box.scrollTop = keepTop;
+  if (key && key !== lastOverlayKey) { const first = (state.overlay === 'login' || state.overlay === 'signup') && box ? box.querySelector('input') : null; if (first || box) (first || box).focus(); }
+  else if (keep && state.overlay) { const el = ov.querySelector(keep); if (el) el.focus(); }
+  else if (keep) { const el = document.querySelector(keep); if (el) el.focus(); }
+  lastOverlayKey = key;
+}
+let toastTimer;
+function toast(msg) {
+  const t = $('#toast'); t.textContent = msg; t.classList.add('show');
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 2400);
+}
+function closeOverlay() { state.overlay = null; state.modal = null; state.checkout = null; state.couponMsg = ''; }
+function showView(v) { state.view = v; closeOverlay(); render(); window.scrollTo(0, 0); }
+
+// ---------- actions ----------
+const newForm = () => ({ name: '', email: '', phone: '', password: '', confirm: '', error: '', notice: '' });
+function needLogin(msg) { state.form = newForm(); state.form.notice = msg; state.modal = null; state.overlay = 'login'; render(); }
+function doLogin() {
+  const f = state.form, email = f.email.trim().toLowerCase();
+  if (!email || !f.password) { f.error = 'Enter your email and password.'; render(); return; }
+  const c = Object.values(custs).find(x => x.email.toLowerCase() === email);
+  if (!c || state.passwords[c.id] !== f.password) { f.error = 'The email or password is not right.'; render(); return; }
+  state.customerId = c.id; state.coupon = null; state.couponInput = ''; closeOverlay(); render();
+  toast('Welcome back, ' + c.name.split(' ')[0]);
+}
+function doSignup() {
+  const f = state.form, name = f.name.trim(), email = f.email.trim().toLowerCase();
+  if (!name || !email || !f.password) f.error = 'Fill in your name, email and password.';
+  else if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) f.error = 'Enter a valid email address.';
+  else if (Object.values(custs).some(x => x.email.toLowerCase() === email)) f.error = 'An account with this email already exists. Try logging in.';
+  else if (f.password.length < 8) f.error = 'Use at least 8 characters for the password.';
+  else if (f.password !== f.confirm) f.error = 'The two passwords do not match.';
+  else {
+    const id = Math.max.apply(null, Object.keys(custs).map(Number)) + 1;
+    custs[id] = { id: id, name: name, email: email, phone: f.phone.trim() };
+    state.passwords[id] = f.password; state.carts[id] = []; state.wish[id] = [];   // every customer gets one cart
+    state.customerId = id; closeOverlay(); render();
+    toast('Account created. Welcome, ' + name.split(' ')[0]); return;
+  }
+  render();
+}
+function logout() { state.customerId = null; state.coupon = null; state.couponInput = ''; showView('home'); toast('Logged out'); }
+function openProduct(pid) {
+  const vs = variantsOf(pid), first = vs.find(v => state.stock[v.id] > 0) || vs[0];
+  state.modal = { pid: pid, vid: first.id, img: 0, qty: 1, rating: '', text: '', reviewError: '' };
+  state.overlay = 'product'; render();
+}
+function toggleWish(pid) {
+  if (!state.customerId) { needLogin('Log in to save products to your wishlist.'); return; }
+  const w = wishOf(state.customerId), i = w.indexOf(pid);
+  if (i >= 0) { w.splice(i, 1); toast('Removed from wishlist'); } else { w.push(pid); toast('Saved to wishlist'); }
+  render();
+}
+function addToCart() {
+  if (!state.customerId) { needLogin('Log in to add items to your cart.'); return; }
+  const m = state.modal, cart = cartOf(state.customerId), line = cart.find(l => l.variantId === m.vid);
+  const room = state.stock[m.vid] - (line ? line.qty : 0);
+  if (room <= 0) { toast('Your cart already has all the stock of this style'); return; }
+  const add = Math.min(m.qty, room);
+  if (line) line.qty += add; else cart.push({ variantId: m.vid, qty: add });   // the same style is never added twice as two lines
+  toast(add < m.qty ? 'Added ' + add + ', that is all we have' : 'Added to cart');
+  render();
+}
+function changeLine(vid, delta) {
+  const cart = cartOf(state.customerId), line = cart.find(l => l.variantId === vid);
+  if (!line) return;
+  const next = line.qty + delta;
+  if (next < 1) return;
+  if (next > state.stock[vid]) { toast('Only ' + state.stock[vid] + ' in stock'); return; }
+  line.qty = next; render();
+}
+function applyCoupon() {
+  const code = state.couponInput.trim().toLowerCase();
+  const c = DB.coupons.find(x => x.code.toLowerCase() === code);
+  if (!code) state.couponMsg = 'Type a coupon code first.';
+  else if (!c) state.couponMsg = 'That code does not exist.';
+  else if (new Date(c.expiry + 'T23:59:59') < new Date()) state.couponMsg = 'Code ' + c.code + ' expired on ' + fmtDate(c.expiry) + '.';
+  else { state.coupon = c; state.couponMsg = ''; state.couponInput = ''; toast('Code applied'); }
+  render();
+}
+function openCheckout() {
+  const mine = state.addresses.filter(a => a.customerId === state.customerId);
+  state.checkout = { addressId: mine.length ? mine[0].id : 'new', method: METHODS[0], line1: '', city: '', postal: '', country: 'Pakistan', error: '' };
+  state.overlay = 'checkout'; render();
+}
+function placeOrder() {
+  const c = state.checkout, lines = cartLines(), cid = state.customerId;
+  if (!lines.length) { c.error = 'Your cart is empty.'; render(); return; }
+  for (const l of lines) if (l.qty > state.stock[l.variantId]) { c.error = 'Not enough stock for ' + l.p.name + '. Lower the quantity in your cart.'; render(); return; }
+  let addressId = Number(c.addressId);
+  if (c.addressId === 'new') {
+    if (!c.line1.trim() || !c.city.trim() || !c.country.trim()) { c.error = 'Fill in street address, city and country.'; render(); return; }
+    addressId = Math.max.apply(null, state.addresses.map(a => a.id)) + 1;
+    state.addresses.push({ id: addressId, customerId: cid, line1: c.line1.trim(), city: c.city.trim(), postalCode: c.postal.trim(), country: c.country.trim() });
+  }
+  const t = totals(lines, state.coupon), id = Math.max.apply(null, state.orders.map(o => o.id)) + 1, now = new Date().toISOString();
+  state.orders.push({ id: id, customerId: cid, couponId: state.coupon ? state.coupon.id : null, date: now, status: 'Processing', total: t.total });
+  lines.forEach(l => { state.items.push({ orderId: id, variantId: l.variantId, qty: l.qty, unitPrice: l.price }); state.stock[l.variantId] -= l.qty; });
+  state.payments.push({ orderId: id, method: c.method, amount: t.total, status: c.method === 'Cash on Delivery' ? 'Pending' : 'Completed', date: now });
+  state.shipments.push({ orderId: id, addressId: addressId, carrier: null, tracking: null, status: 'Processing', shipped: null, delivered: null });
+  state.carts[cid] = []; state.coupon = null; state.checkout = null; state.modal = null;
+  state.confirmId = id; state.overlay = 'confirm'; render();
+}
+function cancelOrder(id) {
+  const o = state.orders.find(x => x.id === id);
+  if (!o || (o.status !== 'Pending' && o.status !== 'Processing')) return;
+  o.status = 'Cancelled';
+  state.shipments.filter(s => s.orderId === id).forEach(s => { s.status = 'Cancelled'; });
+  state.payments.filter(p => p.orderId === id && p.status === 'Completed').forEach(p => { p.status = 'Refunded'; });
+  state.items.filter(i => i.orderId === id).forEach(i => { state.stock[i.variantId] += i.qty; });
+  toast('Order cancelled'); render();
+}
+function postReview() {
+  if (!state.customerId) { needLogin('Log in to write a review.'); return; }
+  const m = state.modal, rating = Number(m.rating), text = (m.text || '').trim();
+  if (!rating || !text) { m.reviewError = 'Choose a rating and write a short comment.'; render(); return; }
+  state.reviews.push({ productId: m.pid, customerId: state.customerId, rating: rating, comment: text });
+  m.rating = ''; m.text = ''; m.reviewError = ''; toast('Review posted'); render();
+}
+function clearSearch() { state.query = ''; $('#q').value = ''; }
+
+// ---------- events ----------
+document.addEventListener('click', e => {
+  const el = e.target.closest('[data-act]');
+  if (!el) return;
+  const act = el.dataset.act, id = Number(el.dataset.id);
+  switch (act) {
+    case 'nav':
+      if (el.dataset.view === 'shop') { state.cat = 0; clearSearch(); }
+      showView(el.dataset.view); break;
+    case 'menu-open': state.modal = null; state.menuOpen = {}; if (state.cat) state.menuOpen[topOf(state.cat).id] = true; state.overlay = 'menu'; render(); break;
+    case 'menu-toggle': state.menuOpen[id] = !state.menuOpen[id]; render(); break;
+    case 'menu-cat': state.cat = id; clearSearch(); showView('shop'); break;
+    case 'clear-cat': state.cat = 0; render(); break;
+    case 'clear-q': clearSearch(); render(); break;
+    case 'clear': state.cat = 0; clearSearch(); render(); break;
+    case 'profile-open': if (!state.customerId) needLogin('Log in to see your profile.'); else showView('profile'); break;
+    case 'open': openProduct(id); break;
+    case 'wish': toggleWish(id); break;
+    case 'backdrop': if (e.target === el) { closeOverlay(); render(); } break;
+    case 'close': closeOverlay(); render(); break;
+    case 'thumb': state.modal.img = id; render(); break;
+    case 'variant': state.modal.vid = id; state.modal.qty = 1; render(); break;
+    case 'qty-dec': state.modal.qty = Math.max(1, state.modal.qty - 1); render(); break;
+    case 'qty-inc': state.modal.qty = Math.min(Math.max(1, state.stock[state.modal.vid]), state.modal.qty + 1); render(); break;
+    case 'add': addToCart(); break;
+    case 'review': postReview(); break;
+    case 'cart-open': if (!state.customerId) { needLogin('Log in to see your cart.'); break; } state.overlay = 'cart'; state.modal = null; render(); break;
+    case 'login-open': state.form = newForm(); state.modal = null; state.overlay = 'login'; render(); break;
+    case 'signup-open': state.form = newForm(); state.modal = null; state.overlay = 'signup'; render(); break;
+    case 'login': doLogin(); break;
+    case 'signup': doSignup(); break;
+    case 'logout': logout(); break;
+    case 'line-inc': changeLine(id, 1); break;
+    case 'line-dec': changeLine(id, -1); break;
+    case 'line-remove': state.carts[state.customerId] = cartOf(state.customerId).filter(l => l.variantId !== id); render(); break;
+    case 'coupon-apply': applyCoupon(); break;
+    case 'coupon-remove': state.coupon = null; render(); break;
+    case 'checkout-open': openCheckout(); break;
+    case 'place': placeOrder(); break;
+    case 'cancel-order': cancelOrder(id); break;
+    case 'go-orders': showView('orders'); break;
+  }
+});
+function setPath(path, val) {
+  const keys = path.split('.'); let o = state;
+  for (let i = 0; i < keys.length - 1; i++) o = o[keys[i]];
+  o[keys[keys.length - 1]] = val;
+}
+document.addEventListener('input', e => {
+  const t = e.target;
+  if (t.id === 'q') {
+    state.query = t.value; closeOverlay();
+    if (state.view !== 'shop') state.view = 'shop';
+    render(); return;
+  }
+  if (t.dataset.bind && t.tagName !== 'SELECT' && t.type !== 'radio') setPath(t.dataset.bind, t.value);
+});
+document.addEventListener('change', e => {
+  const t = e.target;
+  if (t.dataset.bind) { setPath(t.dataset.bind, t.value); if (t.type === 'radio' || t.tagName === 'SELECT') render(); }
+});
+document.addEventListener('keydown', e => {
+  if (!state.overlay) return;
+  if (e.key === 'Enter' && e.target.dataset && e.target.dataset.enter !== undefined) { e.preventDefault(); const b = $('#overlay [data-primary]'); if (b) b.click(); return; }
+  if (e.key === 'Escape') { closeOverlay(); render(); return; }
+  if (e.key === 'Tab') {
+    const box = $('#overlay [tabindex="-1"]'); if (!box) return;
+    const f = box.querySelectorAll('button:not([disabled]),input,select,textarea,[href]');
+    if (!f.length) return;
+    const first = f[0], last = f[f.length - 1];
+    if (e.shiftKey && (document.activeElement === first || document.activeElement === box)) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  }
+});
+
+// ---------- start ----------
+render();
+})();
+</script>
+</body>
+</html>
