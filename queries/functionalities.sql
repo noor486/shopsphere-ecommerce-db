@@ -2,7 +2,7 @@
 -- ShopSphere: Phase 2 - Functionalities
 -- Noor Fatima | 23L-0946
 
--- Parts 1-4 only read data. Part 5 (19-24) changes data, so it comes
+-- Parts 1-4 only read data. Part 5 (21-26) changes data, so it comes
 -- last and the earlier results stay the same.
 -- =====================================================================
 
@@ -197,41 +197,87 @@ JOIN ProductVariant v ON oi.VariantID = v.VariantID
 JOIN Product p ON v.ProductID = p.ProductID
 WHERE oi.UnitPrice = (SELECT MAX(UnitPrice) FROM OrderItem);
 
+-- Functionality 19: Order detail view, line items with product names
+-- Keywords: SELECT, JOIN, WHERE, ORDER BY
+SELECT o.OrderID, c.Name AS Customer, p.Name AS Product, v.SKU,
+       oi.Quantity, oi.UnitPrice, oi.Quantity * oi.UnitPrice AS LineTotal
+FROM [Order] o
+JOIN Customer c       ON o.CustomerID = c.CustomerID
+JOIN OrderItem oi     ON oi.OrderID = o.OrderID
+JOIN ProductVariant v ON oi.VariantID = v.VariantID
+JOIN Product p        ON v.ProductID = p.ProductID
+WHERE o.OrderID = 1
+ORDER BY p.Name;
+
+-- Functionality 20: Category performance, revenue and units sold per category
+-- Keywords: SELECT, JOIN, WHERE, GROUP BY, SUM, ORDER BY
+SELECT cat.Name AS Category,
+       SUM(oi.Quantity) AS UnitsSold,
+       SUM(oi.Quantity * oi.UnitPrice) AS Revenue
+FROM OrderItem oi
+JOIN [Order] o        ON oi.OrderID = o.OrderID
+JOIN ProductVariant v ON oi.VariantID = v.VariantID
+JOIN Product p        ON v.ProductID = p.ProductID
+JOIN Category cat     ON p.CategoryID = cat.CategoryID
+WHERE o.Status <> 'Cancelled'
+GROUP BY cat.CategoryID, cat.Name
+ORDER BY Revenue DESC;
+
 -- =====================================================================
 -- PART 5: Changing data (insert, update, delete) - run once
 -- =====================================================================
 
--- Functionality 19: Register a new customer
+-- Functionality 21: Register a new customer
 -- Keywords: INSERT
 INSERT INTO Customer (Name, Email, Password, Phone)
 VALUES ('Maryam Aslam', 'maryam.aslam@example.com', 'hashed_pw_016', '03111234567');
 
--- Functionality 20: Save a shipping address for the new customer
+-- Functionality 22: Save a shipping address for the new customer
 -- Keywords: INSERT, nested query
 INSERT INTO Address (CustomerID, Line1, City, PostalCode, Country, AddressType)
 VALUES ((SELECT CustomerID FROM Customer WHERE Email = 'maryam.aslam@example.com'),
         'House 40, Garden Town', 'Lahore', '54000', 'Pakistan', 'Shipping');
 
--- Functionality 21: Restock a low-stock variant after a supplier delivery
+-- Functionality 23: Restock a low-stock variant after a supplier delivery
 -- Keywords: UPDATE, WHERE
 UPDATE ProductVariant
 SET StockQty = StockQty + 25
 WHERE SKU = 'LP-LED-WHT';
 
--- Functionality 22: Cancel a customer's pending order
+-- Functionality 24: Cancel a customer's pending order (and its payment and shipment)
 -- Keywords: UPDATE, WHERE, nested query
+
+-- 1. Cancel the pending payment(s) of that customer's pending orders
+UPDATE Payment
+SET Status = 'Cancelled'
+WHERE Status = 'Pending'
+  AND OrderID IN (SELECT OrderID FROM [Order]
+                  WHERE Status = 'Pending'
+                    AND CustomerID = (SELECT CustomerID FROM Customer
+                                      WHERE Email = 'danish.aslam@example.com'));
+
+-- 2. Cancel the shipment of that customer's pending order(s)
+UPDATE Shipment
+SET Status = 'Cancelled'
+WHERE OrderID IN (SELECT OrderID FROM [Order]
+                  WHERE Status = 'Pending'
+                    AND CustomerID = (SELECT CustomerID FROM Customer
+                                      WHERE Email = 'danish.aslam@example.com'));
+
+-- 3. Finally cancel the order itself
 UPDATE [Order]
 SET Status = 'Cancelled'
 WHERE Status = 'Pending'
-  AND CustomerID = (SELECT CustomerID FROM Customer WHERE Email = 'danish.aslam@example.com');
+  AND CustomerID = (SELECT CustomerID FROM Customer
+                    WHERE Email = 'danish.aslam@example.com');
 
--- Functionality 23: Remove a product from a customer's wishlist
+-- Functionality 25: Remove a product from a customer's wishlist
 -- Keywords: DELETE, WHERE, nested query
 DELETE FROM WishlistItem
 WHERE CustomerID = (SELECT CustomerID FROM Customer WHERE Email = 'sana.riaz@example.com')
   AND ProductID = (SELECT ProductID FROM Product WHERE Name = 'Table Lamp');
 
--- Functionality 24: Delete expired coupons that were never used on an order
+-- Functionality 26: Delete expired coupons that were never used on an order
 -- Keywords: DELETE, WHERE, nested query
 DELETE FROM Coupon
 WHERE ExpiryDate < CAST(GETDATE() AS DATE)
