@@ -1,7 +1,8 @@
 -- ShopSphere: E-Commerce Shopping Store Database
 -- Schema (DDL) -- SQL Server (T-SQL)
--- All 16 tables, normalized to BCNF, in dependency order.
--- Run on an empty database to recreate the whole schema.
+-- All 16 tables (normalized to BCNF, in dependency order), their indexes,
+-- sample data, and the Phase 3 views and stored procedures.
+-- Running this file drops and recreates the whole shopsphere database.
 
 -- Switch away from shopsphere first, so the database can be dropped on a re-run.
 USE master;
@@ -209,6 +210,30 @@ CREATE TABLE Shipment (
     CONSTRAINT FK_Shipment_Order FOREIGN KEY (OrderID) REFERENCES [Order](OrderID),
     CONSTRAINT FK_Shipment_Address FOREIGN KEY (AddressID) REFERENCES Address(AddressID)
 );
+GO
+
+-- ===================== INDEXES =====================
+-- Foreign key columns and searched columns, so joins and lookups do not
+-- scan whole tables. Columns that already lead a PRIMARY KEY or UNIQUE
+-- constraint (e.g. ProductVariant.SKU, Cart.CustomerID, CartItem.CartID,
+-- OrderItem.OrderID, Review.CustomerID, Shipment.OrderID) are indexed
+-- automatically and are not repeated here.
+CREATE INDEX IX_Address_Customer     ON Address(CustomerID);
+CREATE INDEX IX_Category_Parent      ON Category(ParentCategoryID);
+CREATE INDEX IX_Product_Category     ON Product(CategoryID);
+CREATE INDEX IX_Product_Seller       ON Product(SellerID);
+CREATE INDEX IX_Product_Name         ON Product(Name);
+CREATE INDEX IX_Variant_Product      ON ProductVariant(ProductID);
+CREATE INDEX IX_Image_Product        ON ProductImage(ProductID);
+CREATE INDEX IX_Review_Product       ON Review(ProductID);
+CREATE INDEX IX_Wishlist_Product     ON WishlistItem(ProductID);
+CREATE INDEX IX_CartItem_Variant     ON CartItem(VariantID);
+CREATE INDEX IX_Order_Customer       ON [Order](CustomerID);
+CREATE INDEX IX_Order_Coupon         ON [Order](CouponID);
+CREATE INDEX IX_Order_Date           ON [Order](OrderDate);
+CREATE INDEX IX_OrderItem_Variant    ON OrderItem(VariantID);
+CREATE INDEX IX_Payment_Order        ON Payment(OrderID);
+CREATE INDEX IX_Shipment_Address     ON Shipment(AddressID);
 GO
 
 -- ===================== SAMPLE DATA =====================
@@ -713,3 +738,354 @@ FROM (VALUES
 JOIN Customer c ON c.Email = x.Email
 JOIN Product p ON p.Name = x.ProductName;
 GO
+
+-- #####################################################################
+-- PHASE 3: VIEWS AND STORED PROCEDURES
+-- The backend API (backend/ folder) uses all four objects.
+--   View 1: vw_ProductCatalog   - one row per product, ready for browsing
+--   View 2: vw_OrderSummary     - one row per order, with payment and shipment
+--   Proc 1: sp_AddToCart        - add an item to a customer's cart
+--   Proc 2: sp_PlaceOrder       - turn a customer's cart into an order
+-- #####################################################################
+
+-- =====================================================================
+-- VIEW 1: vw_ProductCatalog
+-- ---------------------------------------------------------------------
+-- Description:
+--   One row per product with everything a shopper sees on a product
+--   card: category (and its parent category), seller, the cheapest and
+--   dearest variant price, total stock across all variants, average
+--   rating, number of reviews, and the main image.
+--   Without this view, every catalog page would repeat the same five
+--   joins and two GROUP BYs. Products with no variants or no reviews
+--   still appear (LEFT JOIN), with zero stock and zero reviews.
+-- Used by: GET /api/products, GET /api/products/:id
+-- =====================================================================
+CREATE VIEW vw_ProductCatalog AS
+SELECT p.ProductID,
+       p.Name                        AS ProductName,
+       p.Description,
+       p.BasePrice,
+       c.CategoryID,
+       c.Name                        AS CategoryName,
+       c.ParentCategoryID,
+       pc.Name                       AS ParentCategoryName,
+       s.SellerID,
+       s.StoreName                   AS SellerName,
+       v.MinPrice,
+       v.MaxPrice,
+       ISNULL(v.VariantCount, 0)     AS VariantCount,
+       ISNULL(v.TotalStock, 0)       AS TotalStock,
+       ISNULL(r.ReviewCount, 0)      AS ReviewCount,
+       r.AvgRating,
+       (SELECT TOP 1 i.URL
+        FROM ProductImage i
+        WHERE i.ProductID = p.ProductID
+        ORDER BY i.IsPrimary DESC, i.ImageID) AS ImageURL
+FROM Product p
+JOIN Category c       ON p.CategoryID = c.CategoryID
+LEFT JOIN Category pc ON c.ParentCategoryID = pc.CategoryID
+JOIN Seller s         ON p.SellerID = s.SellerID
+LEFT JOIN (SELECT ProductID,
+                  MIN(Price)    AS MinPrice,
+                  MAX(Price)    AS MaxPrice,
+                  COUNT(*)      AS VariantCount,
+                  SUM(StockQty) AS TotalStock
+           FROM ProductVariant
+           GROUP BY ProductID) v ON v.ProductID = p.ProductID
+LEFT JOIN (SELECT ProductID,
+                  COUNT(*) AS ReviewCount,
+                  CAST(AVG(CAST(Rating AS DECIMAL(4,2))) AS DECIMAL(3,2)) AS AvgRating
+           FROM Review
+           GROUP BY ProductID) r ON r.ProductID = p.ProductID;
+GO
+
+-- =====================================================================
+-- VIEW 2: vw_OrderSummary
+-- ---------------------------------------------------------------------
+-- Description:
+--   One row per order joining the customer, the coupon used, the item
+--   count and subtotal (from OrderItem), the discount, the latest
+--   payment attempt, and the shipment status with its destination city.
+--   This is the "My Orders" screen for a customer and the order list
+--   for an administrator.
+--   Discount is Subtotal - TotalAmount, so it is derived, not stored.
+--   An order can have several payments (e.g. a failed attempt then a
+--   retry); the view shows only the most recent one (highest PaymentID).
+-- Used by: GET /api/customers/:id/orders, GET /api/orders/:id,
+--          and the result of sp_PlaceOrder
+-- =====================================================================
+CREATE VIEW vw_OrderSummary AS
+SELECT o.OrderID,
+       o.OrderDate,
+       o.Status                      AS OrderStatus,
+       c.CustomerID,
+       c.Name                        AS CustomerName,
+       c.Email                       AS CustomerEmail,
+       cp.Code                       AS CouponCode,
+       ISNULL(i.ItemCount, 0)        AS ItemCount,
+       ISNULL(i.Subtotal, 0)         AS Subtotal,
+       ISNULL(i.Subtotal, 0) - o.TotalAmount AS Discount,
+       o.TotalAmount,
+       pay.Method                    AS PaymentMethod,
+       pay.Status                    AS PaymentStatus,
+       s.Status                      AS ShipmentStatus,
+       s.Carrier,
+       s.TrackingNumber,
+       a.City                        AS ShipToCity
+FROM [Order] o
+JOIN Customer c      ON o.CustomerID = c.CustomerID
+LEFT JOIN Coupon cp  ON o.CouponID = cp.CouponID
+LEFT JOIN (SELECT OrderID,
+                  SUM(Quantity)             AS ItemCount,
+                  SUM(Quantity * UnitPrice) AS Subtotal
+           FROM OrderItem
+           GROUP BY OrderID) i ON i.OrderID = o.OrderID
+LEFT JOIN Payment pay ON pay.PaymentID = (SELECT MAX(p2.PaymentID)
+                                          FROM Payment p2
+                                          WHERE p2.OrderID = o.OrderID)
+LEFT JOIN Shipment s ON s.OrderID = o.OrderID
+LEFT JOIN Address a  ON s.AddressID = a.AddressID;
+GO
+
+-- =====================================================================
+-- PROCEDURE 1: sp_AddToCart
+-- ---------------------------------------------------------------------
+-- Description:
+--   Adds @Quantity units of a product variant to a customer's cart.
+--   - Creates the customer's cart if they do not have one yet
+--     (Customer-Cart is 1:1, enforced by UNIQUE on Cart.CustomerID).
+--   - If the variant is already in the cart, it increases the quantity
+--     instead of adding a second line (UNIQUE on CartID, VariantID).
+--   - Refuses to put more units in the cart than are in stock.
+--   Returns the customer's cart lines after the change.
+-- Parameters:
+--   @CustomerID  the shopper
+--   @VariantID   the size/colour (SKU) being added
+--   @Quantity    how many to add, default 1
+-- Errors (THROW, so the API can show the message):
+--   50001 bad quantity, 50002 unknown customer,
+--   50003 unknown variant, 50004 not enough stock
+-- Used by: POST /api/customers/:id/cart
+-- =====================================================================
+CREATE PROCEDURE sp_AddToCart
+    @CustomerID INT,
+    @VariantID  INT,
+    @Quantity   INT = 1
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    -- 1. Check the inputs
+    IF @Quantity IS NULL OR @Quantity < 1
+        THROW 50001, 'Quantity must be at least 1.', 1;
+
+    IF NOT EXISTS (SELECT 1 FROM Customer WHERE CustomerID = @CustomerID)
+        THROW 50002, 'Customer not found.', 1;
+
+    DECLARE @Stock INT;
+    SELECT @Stock = StockQty FROM ProductVariant WHERE VariantID = @VariantID;
+
+    IF @Stock IS NULL
+        THROW 50003, 'Product variant not found.', 1;
+
+    -- 2. Make sure the customer has a cart
+    IF NOT EXISTS (SELECT 1 FROM Cart WHERE CustomerID = @CustomerID)
+        INSERT INTO Cart (CustomerID) VALUES (@CustomerID);
+
+    DECLARE @CartID INT;
+    SELECT @CartID = CartID FROM Cart WHERE CustomerID = @CustomerID;
+
+    -- 3. How many of this variant are already in the cart?
+    DECLARE @InCart INT;
+    SELECT @InCart = Quantity FROM CartItem WHERE CartID = @CartID AND VariantID = @VariantID;
+    SET @InCart = ISNULL(@InCart, 0);
+
+    IF @InCart + @Quantity > @Stock
+        THROW 50004, 'Not enough stock for this item.', 1;
+
+    -- 4. Add a new line, or increase the existing one
+    IF @InCart = 0
+        INSERT INTO CartItem (CartID, VariantID, Quantity)
+        VALUES (@CartID, @VariantID, @Quantity);
+    ELSE
+        UPDATE CartItem
+        SET Quantity = Quantity + @Quantity
+        WHERE CartID = @CartID AND VariantID = @VariantID;
+
+    -- 5. Return the updated cart
+    SELECT ci.VariantID, p.ProductID, p.Name AS ProductName, v.SKU, v.Size, v.Color,
+           ci.Quantity, v.Price, ci.Quantity * v.Price AS LineTotal
+    FROM CartItem ci
+    JOIN ProductVariant v ON ci.VariantID = v.VariantID
+    JOIN Product p        ON v.ProductID = p.ProductID
+    WHERE ci.CartID = @CartID
+    ORDER BY p.Name;
+END
+GO
+
+-- =====================================================================
+-- PROCEDURE 2: sp_PlaceOrder
+-- ---------------------------------------------------------------------
+-- Description:
+--   Checkout. Turns everything in the customer's cart into a new order:
+--     a. creates the Order row (Status 'Pending')
+--     b. copies each cart line into OrderItem, saving today's price
+--        as UnitPrice
+--     c. takes the ordered quantities off ProductVariant.StockQty
+--     d. records a 'Pending' Payment for the order total
+--     e. creates the Shipment ('Processing') to the chosen address
+--     f. empties the cart
+--   If a coupon code is given it must exist and not be expired;
+--   Percentage coupons take a percent off, Fixed coupons take an
+--   amount off (never below zero).
+--   Returns the new order's row from vw_OrderSummary.
+--
+--   Note: every check runs BEFORE anything is written, so a rejected
+--   checkout (empty cart, wrong address, low stock, bad coupon) changes
+--   nothing. Steps a-f are not yet wrapped in a transaction; the
+--   proposal requires that and it will be added in a later phase.
+-- Parameters:
+--   @CustomerID     the shopper
+--   @AddressID      one of the shopper's own saved addresses
+--   @PaymentMethod  e.g. 'Credit Card', 'JazzCash', 'Cash on Delivery'
+--   @CouponCode     optional
+-- Errors (THROW):
+--   50010 empty cart, 50011 address not the customer's,
+--   50012 not enough stock, 50013 bad or expired coupon,
+--   50014 missing payment method
+-- Used by: POST /api/customers/:id/orders
+-- =====================================================================
+CREATE PROCEDURE sp_PlaceOrder
+    @CustomerID    INT,
+    @AddressID     INT,
+    @PaymentMethod NVARCHAR(30),
+    @CouponCode    NVARCHAR(30) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    -- ---------- 1. Checks (nothing is changed yet) ----------
+    DECLARE @CartID INT;
+    SELECT @CartID = CartID FROM Cart WHERE CustomerID = @CustomerID;
+
+    IF @CartID IS NULL OR NOT EXISTS (SELECT 1 FROM CartItem WHERE CartID = @CartID)
+        THROW 50010, 'The cart is empty.', 1;
+
+    IF NOT EXISTS (SELECT 1 FROM Address WHERE AddressID = @AddressID AND CustomerID = @CustomerID)
+        THROW 50011, 'That address does not belong to this customer.', 1;
+
+    IF EXISTS (SELECT 1
+               FROM CartItem ci
+               JOIN ProductVariant v ON ci.VariantID = v.VariantID
+               WHERE ci.CartID = @CartID AND ci.Quantity > v.StockQty)
+        THROW 50012, 'Some items in the cart do not have enough stock.', 1;
+
+    IF @PaymentMethod IS NULL OR LTRIM(RTRIM(@PaymentMethod)) = ''
+        THROW 50014, 'A payment method is required.', 1;
+
+    DECLARE @CouponID INT = NULL,
+            @DiscountType NVARCHAR(20),
+            @DiscountValue DECIMAL(10,2);
+
+    IF @CouponCode IS NOT NULL AND LTRIM(RTRIM(@CouponCode)) <> ''
+    BEGIN
+        SELECT @CouponID = CouponID, @DiscountType = DiscountType, @DiscountValue = DiscountValue
+        FROM Coupon
+        WHERE Code = @CouponCode AND ExpiryDate >= CAST(GETDATE() AS DATE);
+
+        IF @CouponID IS NULL
+            THROW 50013, 'The coupon code is invalid or has expired.', 1;
+    END
+
+    -- ---------- 2. Work out the total ----------
+    DECLARE @Subtotal DECIMAL(10,2), @Total DECIMAL(10,2);
+
+    SELECT @Subtotal = SUM(ci.Quantity * v.Price)
+    FROM CartItem ci
+    JOIN ProductVariant v ON ci.VariantID = v.VariantID
+    WHERE ci.CartID = @CartID;
+
+    SET @Total = CASE
+                     WHEN @CouponID IS NULL             THEN @Subtotal
+                     WHEN @DiscountType = 'Percentage'  THEN @Subtotal * (1 - @DiscountValue / 100)
+                     ELSE @Subtotal - @DiscountValue
+                 END;
+
+    IF @Total < 0 SET @Total = 0;
+
+    -- ---------- 3. a. Create the order ----------
+    INSERT INTO [Order] (CustomerID, CouponID, Status, TotalAmount)
+    VALUES (@CustomerID, @CouponID, 'Pending', @Total);
+
+    DECLARE @OrderID INT = SCOPE_IDENTITY();
+
+    -- b. Copy the cart lines, saving the current price
+    INSERT INTO OrderItem (OrderID, VariantID, Quantity, UnitPrice)
+    SELECT @OrderID, ci.VariantID, ci.Quantity, v.Price
+    FROM CartItem ci
+    JOIN ProductVariant v ON ci.VariantID = v.VariantID
+    WHERE ci.CartID = @CartID;
+
+    -- c. Take the items out of stock
+    UPDATE v
+    SET v.StockQty = v.StockQty - ci.Quantity
+    FROM ProductVariant v
+    JOIN CartItem ci ON ci.VariantID = v.VariantID
+    WHERE ci.CartID = @CartID;
+
+    -- d. Record the payment as pending
+    INSERT INTO Payment (OrderID, Method, Amount, Status)
+    VALUES (@OrderID, @PaymentMethod, @Total, 'Pending');
+
+    -- e. Create the shipment to the chosen address
+    INSERT INTO Shipment (OrderID, AddressID, Status)
+    VALUES (@OrderID, @AddressID, 'Processing');
+
+    -- f. Empty the cart
+    DELETE FROM CartItem WHERE CartID = @CartID;
+
+    -- ---------- 4. Return the new order ----------
+    SELECT * FROM vw_OrderSummary WHERE OrderID = @OrderID;
+END
+GO
+
+-- =====================================================================
+-- EXAMPLES: using the views and procedures
+-- Commented out so that rebuilding the database keeps the sample data
+-- exactly as above. Select a block and run it on its own in SSMS.
+-- =====================================================================
+
+-- View 1: browse the catalog, best-rated first
+-- SELECT ProductName, CategoryName, SellerName, MinPrice, MaxPrice, TotalStock, ReviewCount, AvgRating
+-- FROM vw_ProductCatalog
+-- ORDER BY AvgRating DESC, ProductName;
+
+-- View 1: everything under the Electronics department (the category or its subcategories)
+-- SELECT ProductName, CategoryName, MinPrice, TotalStock
+-- FROM vw_ProductCatalog
+-- WHERE CategoryName = 'Electronics' OR ParentCategoryName = 'Electronics'
+-- ORDER BY CategoryName, ProductName;
+
+-- View 2: all orders, newest first
+-- SELECT OrderID, OrderDate, CustomerName, OrderStatus, Subtotal, CouponCode, Discount,
+--        TotalAmount, PaymentStatus, ShipmentStatus, ShipToCity
+-- FROM vw_OrderSummary
+-- ORDER BY OrderDate DESC;
+
+-- View 2: orders that are paid but not yet delivered
+-- SELECT OrderID, CustomerName, TotalAmount, ShipmentStatus, Carrier, TrackingNumber
+-- FROM vw_OrderSummary
+-- WHERE PaymentStatus = 'Completed' AND ShipmentStatus IN ('Processing', 'Shipped');
+
+-- Procedure 1: Rehan's cart is empty; add one Yoga Mat, then one more (quantity becomes 2)
+-- DECLARE @Rehan INT = (SELECT CustomerID FROM Customer WHERE Email = 'rehan.qureshi@example.com');
+-- DECLARE @YogaMat INT = (SELECT VariantID FROM ProductVariant WHERE SKU = 'YM-6MM-PRP');
+-- EXEC sp_AddToCart @CustomerID = @Rehan, @VariantID = @YogaMat, @Quantity = 1;
+-- EXEC sp_AddToCart @CustomerID = @Rehan, @VariantID = @YogaMat;
+
+-- Procedure 2: Kinza checks out her cart (charging pad + 2 books) with SAVE10
+-- DECLARE @Kinza INT = (SELECT CustomerID FROM Customer WHERE Email = 'kinza.yousaf@example.com');
+-- DECLARE @KinzaAddress INT = (SELECT TOP 1 AddressID FROM Address WHERE CustomerID = @Kinza);
+-- EXEC sp_PlaceOrder @CustomerID = @Kinza, @AddressID = @KinzaAddress,
+--                    @PaymentMethod = 'JazzCash', @CouponCode = 'SAVE10';
