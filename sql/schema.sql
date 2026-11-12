@@ -859,6 +859,9 @@ GO
 --     instead of adding a second line (UNIQUE on CartID, VariantID).
 --   - Refuses to put more units in the cart than are in stock.
 --   Returns the customer's cart lines after the change.
+--   No transaction is needed here: stock is not changed, and if the
+--   cart line fails to save, the only thing left behind is an empty
+--   cart, which is a normal, valid state for any customer.
 -- Parameters:
 --   @CustomerID  the shopper
 --   @VariantID   the size/colour (SKU) being added
@@ -941,10 +944,18 @@ GO
 --   amount off (never below zero).
 --   Returns the new order's row from vw_OrderSummary.
 --
---   Note: every check runs BEFORE anything is written, so a rejected
---   checkout (empty cart, wrong address, low stock, bad coupon) changes
---   nothing. Steps a-f are not yet wrapped in a transaction; the
---   proposal requires that and it will be added in a later phase.
+--   Transaction: steps a-f run inside ONE transaction, as the proposal
+--   requires ("order placement and inventory decrement occur within a
+--   single transaction"). Either all six steps are saved, or, if any of
+--   them fails, ROLLBACK undoes the ones already done. So there can never
+--   be an order without its items, stock taken without an order, or an
+--   order whose cart was not emptied.
+--   Example: two shoppers check out the last unit at the same moment.
+--   Both pass the stock check, but for the second one step c would make
+--   StockQty negative, so the CHECK (StockQty >= 0) constraint fails and
+--   that whole order is rolled back.
+--   The checks in part 1 run before the transaction starts, so a
+--   rejected checkout never opens a transaction at all.
 -- Parameters:
 --   @CustomerID     the shopper
 --   @AddressID      one of the shopper's own saved addresses
@@ -954,6 +965,7 @@ GO
 --   50010 empty cart, 50011 address not the customer's,
 --   50012 not enough stock, 50013 bad or expired coupon,
 --   50014 missing payment method
+--   (50012 is also raised if stock ran out during the transaction)
 -- Used by: POST /api/customers/:id/orders
 -- =====================================================================
 CREATE PROCEDURE sp_PlaceOrder
@@ -964,6 +976,9 @@ CREATE PROCEDURE sp_PlaceOrder
 AS
 BEGIN
     SET NOCOUNT ON;
+    -- If anything goes wrong inside the transaction (even a dropped
+    -- connection), SQL Server rolls the whole transaction back.
+    SET XACT_ABORT ON;
 
     -- ---------- 1. Checks (nothing is changed yet) ----------
     DECLARE @CartID INT;
@@ -1014,36 +1029,57 @@ BEGIN
 
     IF @Total < 0 SET @Total = 0;
 
-    -- ---------- 3. a. Create the order ----------
-    INSERT INTO [Order] (CustomerID, CouponID, Status, TotalAmount)
-    VALUES (@CustomerID, @CouponID, 'Pending', @Total);
+    -- ---------- 3. Save the order: all of a-f, or none of it ----------
+    DECLARE @OrderID INT;
 
-    DECLARE @OrderID INT = SCOPE_IDENTITY();
+    BEGIN TRY
+        BEGIN TRANSACTION;
 
-    -- b. Copy the cart lines, saving the current price
-    INSERT INTO OrderItem (OrderID, VariantID, Quantity, UnitPrice)
-    SELECT @OrderID, ci.VariantID, ci.Quantity, v.Price
-    FROM CartItem ci
-    JOIN ProductVariant v ON ci.VariantID = v.VariantID
-    WHERE ci.CartID = @CartID;
+        -- a. Create the order
+        INSERT INTO [Order] (CustomerID, CouponID, Status, TotalAmount)
+        VALUES (@CustomerID, @CouponID, 'Pending', @Total);
 
-    -- c. Take the items out of stock
-    UPDATE v
-    SET v.StockQty = v.StockQty - ci.Quantity
-    FROM ProductVariant v
-    JOIN CartItem ci ON ci.VariantID = v.VariantID
-    WHERE ci.CartID = @CartID;
+        SET @OrderID = SCOPE_IDENTITY();
 
-    -- d. Record the payment as pending
-    INSERT INTO Payment (OrderID, Method, Amount, Status)
-    VALUES (@OrderID, @PaymentMethod, @Total, 'Pending');
+        -- b. Copy the cart lines, saving the current price
+        INSERT INTO OrderItem (OrderID, VariantID, Quantity, UnitPrice)
+        SELECT @OrderID, ci.VariantID, ci.Quantity, v.Price
+        FROM CartItem ci
+        JOIN ProductVariant v ON ci.VariantID = v.VariantID
+        WHERE ci.CartID = @CartID;
 
-    -- e. Create the shipment to the chosen address
-    INSERT INTO Shipment (OrderID, AddressID, Status)
-    VALUES (@OrderID, @AddressID, 'Processing');
+        -- c. Take the items out of stock
+        UPDATE v
+        SET v.StockQty = v.StockQty - ci.Quantity
+        FROM ProductVariant v
+        JOIN CartItem ci ON ci.VariantID = v.VariantID
+        WHERE ci.CartID = @CartID;
 
-    -- f. Empty the cart
-    DELETE FROM CartItem WHERE CartID = @CartID;
+        -- d. Record the payment as pending
+        INSERT INTO Payment (OrderID, Method, Amount, Status)
+        VALUES (@OrderID, @PaymentMethod, @Total, 'Pending');
+
+        -- e. Create the shipment to the chosen address
+        INSERT INTO Shipment (OrderID, AddressID, Status)
+        VALUES (@OrderID, @AddressID, 'Processing');
+
+        -- f. Empty the cart
+        DELETE FROM CartItem WHERE CartID = @CartID;
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        -- Undo every step that was already done
+        IF @@TRANCOUNT > 0
+            ROLLBACK TRANSACTION;
+
+        -- 547 = a CHECK constraint failed; here that means stock would go
+        -- below zero because someone else bought the items first.
+        IF ERROR_NUMBER() = 547
+            THROW 50012, 'Some items in the cart do not have enough stock.', 1;
+
+        THROW;   -- pass any other error on unchanged
+    END CATCH
 
     -- ---------- 4. Return the new order ----------
     SELECT * FROM vw_OrderSummary WHERE OrderID = @OrderID;
