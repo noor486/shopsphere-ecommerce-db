@@ -3,15 +3,26 @@
 -- All 16 tables (normalized to BCNF, in dependency order), their indexes,
 -- sample data, and the Phase 3 views and stored procedures.
 -- Running this file drops and recreates the whole shopsphere database.
+-- STOP THE API FIRST (Ctrl+C in its terminal): a program still connected
+-- to shopsphere stops the old copy from being dropped.
 
 -- Switch away from shopsphere first, so the database can be dropped on a re-run.
 USE master;
 GO
 
+-- Drop the old copy. If that fails because something is still connected,
+-- stop the whole script right here (severity 20 ends the connection), so
+-- nothing below runs in the wrong database.
 IF DB_ID('shopsphere') IS NOT NULL
 BEGIN
-    ALTER DATABASE shopsphere SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
-    DROP DATABASE shopsphere;
+    BEGIN TRY
+        ALTER DATABASE shopsphere SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
+        DROP DATABASE shopsphere;
+    END TRY
+    BEGIN CATCH
+        PRINT ERROR_MESSAGE();
+        RAISERROR('STOPPED: shopsphere is still in use by another program (usually the API), so it was not rebuilt. Stop the API (Ctrl+C in its terminal), close other windows using shopsphere, then run this file again.', 20, 1) WITH LOG;
+    END CATCH
 END
 GO
 
