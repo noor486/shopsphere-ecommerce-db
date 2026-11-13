@@ -100,7 +100,19 @@ Invoke-RestMethod -Method Post "$api/customers/13/cart" -ContentType "applicatio
 Invoke-RestMethod -Method Post "$api/customers/13/orders" -ContentType "application/json" -Body '{"addressId":13,"paymentMethod":"JazzCash","couponCode":"SAVE10"}'
 ```
 
+## Transactions
+
+Every request that changes more than one table runs inside a single transaction (`BEGIN TRANSACTION ... COMMIT`, with `ROLLBACK` if any step fails), so it is never left half-done:
+
+| Request | Steps that succeed or fail together |
+|---|---|
+| Checkout (`sp_PlaceOrder`) | Create order, copy items, reduce stock, record payment, create shipment, empty cart |
+| Cancel an order | Refund or cancel the payment, cancel the shipment, put stock back, cancel the order |
+| Update a payment | Payment status, plus the order moving to Processing |
+| Update a shipment | Shipment status and dates, plus the order status |
+
+Requests that change only one row or table (register, add an address, restock, wishlist) don't need one, because a single statement already succeeds or fails as a whole. Add to cart (`sp_AddToCart`) may create an empty cart before adding the line; if the line then failed, an empty cart is a normal state, so it doesn't need one either.
+
 ## Not done yet (on purpose)
 
-- **No transactions.** Checkout and cancel are several statements that are not yet wrapped in a transaction. `sp_PlaceOrder` runs all its checks before it changes anything, so a rejected checkout leaves the data untouched. The proposal requires a transaction for checkout, and that is planned for a later phase.
 - **No login tokens or password hashing.** Customer IDs come from the URL. The proposal lists production-grade auth as out of scope.
