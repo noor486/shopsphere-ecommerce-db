@@ -72,6 +72,7 @@ const NEXT_PAYMENT_STATUS = {
 // PATCH /api/admin/payments/:id   body: { status }
 // Pending -> Completed or Failed; Completed -> Refunded.
 // When a payment completes, a Pending order moves to Processing.
+// Both updates run in one transaction.
 router.patch('/payments/:id', async (req, res) => {
   const id = toId(req.params.id);
   requireFields(req.body, ['status']);
@@ -83,12 +84,23 @@ router.patch('/payments/:id', async (req, res) => {
     throw new HttpError(400, `A ${payment.Status} payment cannot become ${status}.`);
   }
 
-  await query('UPDATE Payment SET Status = @status WHERE PaymentID = @id', { id, status });
-  if (status === 'Completed') {
-    await query(
-      `UPDATE [Order] SET Status = 'Processing' WHERE OrderID = @orderId AND Status = 'Pending'`,
-      { orderId: payment.OrderID });
-  }
+  await query(
+    `BEGIN TRY
+       BEGIN TRANSACTION;
+
+       UPDATE Payment SET Status = @status WHERE PaymentID = @id;
+
+       IF @status = 'Completed'
+         UPDATE [Order] SET Status = 'Processing'
+         WHERE OrderID = @orderId AND Status = 'Pending';
+
+       COMMIT TRANSACTION;
+     END TRY
+     BEGIN CATCH
+       IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+       THROW;
+     END CATCH`,
+    { id, status, orderId: payment.OrderID });
 
   const [updated] = await query('SELECT * FROM Payment WHERE PaymentID = @id', { id });
   res.json(updated);
@@ -97,6 +109,7 @@ router.patch('/payments/:id', async (req, res) => {
 // PATCH /api/admin/orders/:id/shipment
 // body: { status: 'Shipped' | 'Delivered', carrier, trackingNumber }
 // Updates the shipment and keeps the order status in step with it.
+// Both updates run in one transaction.
 router.patch('/orders/:id/shipment', async (req, res) => {
   const id = toId(req.params.id);
   const { status, carrier, trackingNumber } = req.body;
@@ -109,15 +122,25 @@ router.patch('/orders/:id/shipment', async (req, res) => {
   if (order.Status === 'Cancelled') throw new HttpError(400, 'This order was cancelled.');
 
   await query(
-    `UPDATE Shipment
-     SET Status         = @status,
-         Carrier        = ISNULL(@carrier, Carrier),
-         TrackingNumber = ISNULL(@trackingNumber, TrackingNumber),
-         ShippedDate    = ISNULL(ShippedDate, GETDATE()),
-         DeliveredDate  = CASE WHEN @status = 'Delivered' THEN GETDATE() ELSE DeliveredDate END
-     WHERE OrderID = @id;
+    `BEGIN TRY
+       BEGIN TRANSACTION;
 
-     UPDATE [Order] SET Status = @status WHERE OrderID = @id;`,
+       UPDATE Shipment
+       SET Status         = @status,
+           Carrier        = ISNULL(@carrier, Carrier),
+           TrackingNumber = ISNULL(@trackingNumber, TrackingNumber),
+           ShippedDate    = ISNULL(ShippedDate, GETDATE()),
+           DeliveredDate  = CASE WHEN @status = 'Delivered' THEN GETDATE() ELSE DeliveredDate END
+       WHERE OrderID = @id;
+
+       UPDATE [Order] SET Status = @status WHERE OrderID = @id;
+
+       COMMIT TRANSACTION;
+     END TRY
+     BEGIN CATCH
+       IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+       THROW;
+     END CATCH`,
     { id, status, carrier, trackingNumber });
 
   const [updated] = await query('SELECT * FROM vw_OrderSummary WHERE OrderID = @id', { id });
