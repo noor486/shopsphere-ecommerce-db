@@ -5,6 +5,7 @@ REST API for the ShopSphere database, built with Node.js, Express and SQL Server
 ## Run it
 
 1. Build the database: open `sql/schema.sql` in SSMS and run it. This creates the tables, indexes, sample data, views and stored procedures.
+   **If the API is running, stop it first (Ctrl+C in its terminal).** The script drops and recreates the database, and it can't drop it while the API is connected. If you forget, the script stops with a "STOPPED: shopsphere is still in use" message and changes nothing; stop the API and run it again. Start the API again after the rebuild.
 2. Install and start the API:
 
    ```
