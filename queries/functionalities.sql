@@ -245,31 +245,45 @@ SET StockQty = StockQty + 25
 WHERE SKU = 'LP-LED-WHT';
 
 -- Functionality 24: Cancel a customer's pending order (and its payment and shipment)
--- Keywords: UPDATE, WHERE, nested query
+-- Keywords: UPDATE, WHERE, nested query, TRANSACTION
+-- The three updates run as one transaction: either the payment, the
+-- shipment and the order are all cancelled, or (if any update fails)
+-- ROLLBACK undoes them all, so the order is never left half-cancelled.
 
--- 1. Cancel the pending payment(s) of that customer's pending orders
-UPDATE Payment
-SET Status = 'Cancelled'
-WHERE Status = 'Pending'
-  AND OrderID IN (SELECT OrderID FROM [Order]
-                  WHERE Status = 'Pending'
-                    AND CustomerID = (SELECT CustomerID FROM Customer
-                                      WHERE Email = 'danish.aslam@example.com'));
+BEGIN TRY
+    BEGIN TRANSACTION;
 
--- 2. Cancel the shipment of that customer's pending order(s)
-UPDATE Shipment
-SET Status = 'Cancelled'
-WHERE OrderID IN (SELECT OrderID FROM [Order]
-                  WHERE Status = 'Pending'
-                    AND CustomerID = (SELECT CustomerID FROM Customer
-                                      WHERE Email = 'danish.aslam@example.com'));
+    -- 1. Cancel the pending payment(s) of that customer's pending orders
+    UPDATE Payment
+    SET Status = 'Cancelled'
+    WHERE Status = 'Pending'
+      AND OrderID IN (SELECT OrderID FROM [Order]
+                      WHERE Status = 'Pending'
+                        AND CustomerID = (SELECT CustomerID FROM Customer
+                                          WHERE Email = 'danish.aslam@example.com'));
 
--- 3. Finally cancel the order itself
-UPDATE [Order]
-SET Status = 'Cancelled'
-WHERE Status = 'Pending'
-  AND CustomerID = (SELECT CustomerID FROM Customer
-                    WHERE Email = 'danish.aslam@example.com');
+    -- 2. Cancel the shipment of that customer's pending order(s)
+    UPDATE Shipment
+    SET Status = 'Cancelled'
+    WHERE OrderID IN (SELECT OrderID FROM [Order]
+                      WHERE Status = 'Pending'
+                        AND CustomerID = (SELECT CustomerID FROM Customer
+                                          WHERE Email = 'danish.aslam@example.com'));
+
+    -- 3. Finally cancel the order itself
+    UPDATE [Order]
+    SET Status = 'Cancelled'
+    WHERE Status = 'Pending'
+      AND CustomerID = (SELECT CustomerID FROM Customer
+                        WHERE Email = 'danish.aslam@example.com');
+
+    COMMIT TRANSACTION;
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0
+        ROLLBACK TRANSACTION;
+    THROW;
+END CATCH;
 
 -- Functionality 25: Remove a product from a customer's wishlist
 -- Keywords: DELETE, WHERE, nested query
