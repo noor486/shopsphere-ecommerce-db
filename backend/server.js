@@ -16,6 +16,21 @@ app.use((req, res, next) => {
   next();
 });
 
+// GET / - opening http://localhost:3000 in a browser shows where to start.
+app.get('/', (req, res) => {
+  res.json({
+    message: 'ShopSphere API is running. All endpoints start with /api (see backend/README.md).',
+    tryThese: [
+      '/api/health',
+      '/api/categories',
+      '/api/products?search=laptop',
+      '/api/products/1',
+      '/api/customers/1/orders',
+      '/api/admin/reports/top-products',
+    ],
+  });
+});
+
 // GET /api/health - is the API running and can it reach the database?
 app.get('/api/health', async (req, res) => {
   const [row] = await db.query('SELECT DB_NAME() AS DatabaseName, COUNT(*) AS Products FROM Product');
