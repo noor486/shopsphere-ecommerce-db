@@ -60,6 +60,7 @@ router.get('/orders/:id', async (req, res) => {
 // Only orders that have not shipped yet (Pending or Processing) can be
 // cancelled. Puts the items back in stock, refunds a completed payment
 // (or cancels a pending one) and cancels the shipment.
+// The four updates run in one transaction: all of them happen or none do.
 router.post('/orders/:id/cancel', async (req, res) => {
   const id = toId(req.params.id);
 
@@ -70,19 +71,29 @@ router.post('/orders/:id/cancel', async (req, res) => {
   }
 
   await query(
-    `UPDATE Payment
-     SET Status = CASE WHEN Status = 'Completed' THEN 'Refunded' ELSE 'Cancelled' END
-     WHERE OrderID = @id AND Status IN ('Pending', 'Completed');
+    `BEGIN TRY
+       BEGIN TRANSACTION;
 
-     UPDATE Shipment SET Status = 'Cancelled' WHERE OrderID = @id;
+       UPDATE Payment
+       SET Status = CASE WHEN Status = 'Completed' THEN 'Refunded' ELSE 'Cancelled' END
+       WHERE OrderID = @id AND Status IN ('Pending', 'Completed');
 
-     UPDATE v
-     SET v.StockQty = v.StockQty + oi.Quantity
-     FROM ProductVariant v
-     JOIN OrderItem oi ON oi.VariantID = v.VariantID
-     WHERE oi.OrderID = @id;
+       UPDATE Shipment SET Status = 'Cancelled' WHERE OrderID = @id;
 
-     UPDATE [Order] SET Status = 'Cancelled' WHERE OrderID = @id;`,
+       UPDATE v
+       SET v.StockQty = v.StockQty + oi.Quantity
+       FROM ProductVariant v
+       JOIN OrderItem oi ON oi.VariantID = v.VariantID
+       WHERE oi.OrderID = @id;
+
+       UPDATE [Order] SET Status = 'Cancelled' WHERE OrderID = @id;
+
+       COMMIT TRANSACTION;
+     END TRY
+     BEGIN CATCH
+       IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+       THROW;
+     END CATCH`,
     { id });
 
   const [updated] = await query('SELECT * FROM vw_OrderSummary WHERE OrderID = @id', { id });
