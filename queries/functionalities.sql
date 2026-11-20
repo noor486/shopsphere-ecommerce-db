@@ -244,11 +244,12 @@ UPDATE ProductVariant
 SET StockQty = StockQty + 25
 WHERE SKU = 'LP-LED-WHT';
 
--- Functionality 24: Cancel a customer's pending order (and its payment and shipment)
--- Keywords: UPDATE, WHERE, nested query, TRANSACTION
--- The three updates run as one transaction: either the payment, the
--- shipment and the order are all cancelled, or (if any update fails)
--- ROLLBACK undoes them all, so the order is never left half-cancelled.
+-- Functionality 24: Cancel a customer's pending order (its payment and shipment,
+-- and put its items back in stock)
+-- Keywords: UPDATE, WHERE, nested query, JOIN, TRANSACTION
+-- The four updates run as one transaction: either the payment, the
+-- shipment, the stock and the order are all updated, or (if any update
+-- fails) ROLLBACK undoes them all, so the order is never left half-cancelled.
 
 BEGIN TRY
     BEGIN TRANSACTION;
@@ -270,7 +271,18 @@ BEGIN TRY
                         AND CustomerID = (SELECT CustomerID FROM Customer
                                           WHERE Email = 'danish.aslam@example.com'));
 
-    -- 3. Finally cancel the order itself
+    -- 3. Put the ordered items back in stock (before step 4, which
+    --    changes the order's status from 'Pending')
+    UPDATE v
+    SET v.StockQty = v.StockQty + oi.Quantity
+    FROM ProductVariant v
+    JOIN OrderItem oi ON oi.VariantID = v.VariantID
+    WHERE oi.OrderID IN (SELECT OrderID FROM [Order]
+                         WHERE Status = 'Pending'
+                           AND CustomerID = (SELECT CustomerID FROM Customer
+                                             WHERE Email = 'danish.aslam@example.com'));
+
+    -- 4. Finally cancel the order itself
     UPDATE [Order]
     SET Status = 'Cancelled'
     WHERE Status = 'Pending'
