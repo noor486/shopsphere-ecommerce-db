@@ -62,12 +62,10 @@
       GET /api/customers/:id/orders            order history, from the view vw_OrderSummary
       GET /api/orders/:id                      one order with its items and payments
       POST /api/orders/:id/cancel              cancel an order (one transaction in the API)
+      POST /api/products/:id/reviews           write a review (only after a delivered order, once)
   - The page keeps a copy of what it loaded and draws itself from it (render).
   - The logged-in customer's ID is remembered in this browser (localStorage), so a
     refresh keeps you logged in. Logging out forgets it.
-  - Connected so far: browsing and search (5.1), product details (5.2), accounts (5.3),
-    wishlist (5.4), cart and coupons (5.5), checkout (5.6), my orders (5.7).
-    Writing reviews comes next.
 */
 (function () {
 'use strict';
@@ -91,7 +89,7 @@ const state = {
   view: 'home', query: '', cat: 0, sort: 'featured',
   results: null, searching: false, // product ids matching the search box / category, from the API
   menuOpen: {}, overlay: null,
-  modal: null,                     // the open product: { pid, detail, vid, img, qty }
+  modal: null,                     // the open product: { pid, detail, vid, img, qty, rating, text, reviewError }
   customer: null,                  // after logging in: { CustomerID, Name, Email, Phone, CreatedAt }
   addresses: [],                   // the customer's saved addresses
   wish: [],                        // ProductIDs in the customer's wishlist
@@ -288,16 +286,22 @@ function ordersView() {
 // Opens over the page. The product's row from vw_ProductCatalog (already loaded) shows the
 // name and colour at once; GET /api/products/:id then brings the variants, images and reviews.
 async function openProduct(pid) {
-  state.modal = { pid: pid, detail: null, vid: null, img: 0, qty: 1, error: '' };
+  state.modal = { pid: pid, detail: null, vid: null, img: 0, qty: 1, error: '', rating: '', text: '', reviewError: '' };
   state.overlay = 'product'; render();
+  await loadProductDetail();
+}
+// Also used after posting a review, to show it and the new average rating.
+async function loadProductDetail() {
   const m = state.modal;
   try {
-    const d = await api.get('/products/' + pid);
+    const d = await api.get('/products/' + m.pid);
     if (state.modal !== m) return;                        // closed, or another product opened
     m.detail = d;
-    // Start on the first variant that is in stock.
-    const first = d.variants.find(v => v.StockQty > 0) || d.variants[0];
-    m.vid = first ? first.VariantID : null;
+    // Start on the first variant that is in stock (or keep the one already chosen).
+    if (!d.variants.some(v => v.VariantID === m.vid)) {
+      const first = d.variants.find(v => v.StockQty > 0) || d.variants[0];
+      m.vid = first ? first.VariantID : null;
+    }
   } catch (e) { if (state.modal === m) m.error = e.message; }
   render();
 }
@@ -311,6 +315,16 @@ function productDialog() {
   const wished = state.wish.includes(p.id);
   const opts = d.variants.map(x => '<button class="opt" data-act="variant" data-id="' + x.VariantID + '" aria-pressed="' + (x.VariantID === m.vid) + '"' + (x.StockQty === 0 ? ' disabled' : '') + '>' + esc(vLabel(x)) + '<small>' + money(x.Price) + (x.StockQty === 0 ? ', sold out' : '') + '</small></button>').join('');
   const stockText = !v ? 'Not available yet' : left === 0 ? 'Sold out' : left < 10 ? 'Only ' + left + ' left' : left + ' in stock';
+  const mine = d.reviews.some(x => x.CustomerID === cid());       // already reviewed by this customer?
+  const form = !cid() ? '<p class="muted">Log in to write a review.</p><button class="btn" data-act="login-open">Log in</button>' :
+    mine ? '<p class="muted">You have already reviewed this product.</p>' :
+    '<b>Write a review as ' + esc(state.customer.Name) + '</b>' +
+    '<p class="muted">You can review a product once an order with it has been delivered to you.</p>' +
+    '<div class="field"><label for="rev-rating"><span>Your rating</span></label><select id="rev-rating" data-bind="modal.rating"><option value="">Choose a rating</option>' +
+      [5, 4, 3, 2, 1].map(n => '<option value="' + n + '"' + (String(m.rating) === String(n) ? ' selected' : '') + '>' + n + ' out of 5</option>').join('') + '</select></div>' +
+    '<div class="field"><label for="rev-text"><span>Your review</span></label><textarea id="rev-text" rows="3" data-bind="modal.text">' + esc(m.text) + '</textarea></div>' +
+    (m.reviewError ? '<p class="err">' + esc(m.reviewError) + '</p>' : '') +
+    '<button class="btn" data-act="review">Post review</button>';
   const revList = d.reviews.length ? d.reviews.map(x => '<div class="review"><span aria-hidden="true" style="color:var(--saffron-deep)">' + stars(x.Rating) + '</span> <span class="sr">' + x.Rating + ' out of 5</span> <b>' + esc(x.CustomerName) + '</b> <span class="muted">' + fmtDate(x.ReviewDate) + '</span><br>' + esc(x.Comment) + '</div>').join('') : '<p class="muted">No reviews yet.</p>';
   return '<div class="backdrop" data-act="backdrop"><section class="dialog" role="dialog" aria-modal="true" aria-labelledby="dlg-title" tabindex="-1">' + close +
     '<div class="dlg-grid"><div class="dlg-media"><div class="dlg-tile" style="background:' + colorOf(p) + '">' + esc(initials(p.name)) + (pics[m.img] ? PIC(pics[m.img]) : '') + '</div>' +
@@ -326,7 +340,7 @@ function productDialog() {
       '<button class="btn" data-act="wish" data-id="' + p.id + '" aria-pressed="' + wished + '">' + (wished ? 'Remove from wishlist' : 'Save to wishlist') + '</button></div>' +
     '</div></div>' +
     (similar.length ? '<div class="similar"><h3>You may also like</h3><div class="grid small">' + similar.map(x => cardHTML(x)).join('') + '</div></div>' : '') +
-    '<div class="reviews"><h3>Reviews</h3>' + revList + '<p class="muted" style="margin-top:14px">Writing a review comes in a later step.</p></div>' +
+    '<div class="reviews"><h3>Reviews</h3>' + revList + '<div style="margin-top:14px">' + form + '</div></div>' +
   '</section></div>';
 }
 
@@ -648,6 +662,25 @@ async function cancelOrder(orderId) {
   refreshCatalog();                          // stock went back up
 }
 
+// ---------- reviews ----------
+// POST /api/products/:id/reviews. The API only accepts it if this customer has a Delivered
+// order containing the product (400 otherwise), and the Review table's
+// UNIQUE (CustomerID, ProductID) allows one review per product (409 the second time).
+// Rating BETWEEN 1 AND 5 is a CHECK constraint on Review.Rating.
+async function postReview() {
+  const m = state.modal, rating = Number(m.rating), text = (m.text || '').trim();
+  if (!rating || !text) { m.reviewError = 'Choose a rating and write a short comment.'; render(); return; }
+  try {
+    await api.post('/products/' + m.pid + '/reviews', { customerId: cid(), rating: rating, comment: text });
+    m.rating = ''; m.text = ''; m.reviewError = '';
+    await loadProductDetail();               // shows the review and the new average
+    toast('Review posted');
+    refreshCatalog();                        // the product card's rating changes too
+  } catch (e) {
+    m.reviewError = e.status === 409 ? 'You have already reviewed this product.' : e.message; render();
+  }
+}
+
 // Load the products again (stock, ratings and sales change after an order).
 async function refreshCatalog() {
   try { await loadCatalog(); if (state.results) search(0); render(); } catch (e) { toast(e.message); }
@@ -721,8 +754,8 @@ document.addEventListener('click', e => {
     case 'signup': once(doSignup); break;
     case 'logout': logout(); break;
     case 'profile-open': if (!cid()) openLogin('Log in to see your profile.'); else showView('profile'); break;
-    // Connected in the next steps
-    case 'later': toast(el.dataset.what + ' comes in a later step.'); break;
+    // reviews
+    case 'review': once(postReview); break;
   }
 });
 // data-bind="form.email" means: keep state.form.email equal to what is typed in this box.
