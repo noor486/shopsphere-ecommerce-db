@@ -68,6 +68,7 @@ main{max-width:1200px;margin:0 auto;padding:22px clamp(14px,3vw,32px) 40px}
 .empty{max-width:480px;margin:56px auto;text-align:center}
 .empty h2{font-size:24px;margin-bottom:8px}
 .empty p{color:var(--ink-soft);margin:0 0 16px}
+.loading{margin:56px auto;text-align:center;color:var(--ink-soft)}
 
 /* home */
 .hero{display:grid;grid-template-columns:1.1fr .9fr;align-items:center;gap:20px;background:var(--mint);border-radius:22px;padding:clamp(24px,5vw,56px);overflow:hidden}
@@ -126,7 +127,7 @@ main{max-width:1200px;margin:0 auto;padding:22px clamp(14px,3vw,32px) 40px}
 .backdrop.side.left{justify-content:flex-start}
 .dialog{position:relative;background:#fff;border-radius:14px;width:min(860px,100%);max-height:92vh;overflow:auto;padding:24px}
 .dialog.narrow{width:min(520px,100%)}
-.drawer{background:#fff;width:min(430px,100%);height:100%;overflow:auto;padding:22px;animation:slide .2s ease-out}
+.drawer{position:relative;background:#fff;width:min(430px,100%);height:100%;overflow:auto;padding:22px;animation:slide .2s ease-out}
 .drawer.left{width:min(330px,100%);animation:slideL .2s ease-out}
 @keyframes slide{from{transform:translateX(40px);opacity:0}to{transform:none;opacity:1}}
 @keyframes slideL{from{transform:translateX(-40px);opacity:0}to{transform:none;opacity:1}}
