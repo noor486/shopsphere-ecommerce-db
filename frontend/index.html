@@ -26,12 +26,12 @@
   </div>
 </div>
 <main id="main"></main>
-<footer>ShopSphere is a student project. Products and categories are read from the project's SQL Server database through the ShopSphere API.</footer>
+<footer>ShopSphere is a student project. Products, categories and accounts are read from and saved to the project's SQL Server database through the ShopSphere API.</footer>
 <nav class="dock" aria-label="Main">
   <button data-act="nav" data-view="home"><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><path d="M3 11l9-8 9 8v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>Home</button>
   <button data-act="later" data-what="The wishlist"><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>Wishlist<span class="count" id="n-wish" hidden>0</span></button>
   <button data-act="later" data-what="My orders"><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><path d="M21 8l-9-5-9 5v8l9 5 9-5z"/><path d="M3 8l9 5 9-5M12 13v8"/></svg>My orders</button>
-  <button data-act="later" data-what="Your profile"><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>Profile</button>
+  <button data-act="profile-open"><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>Profile</button>
 </nav>
 <div id="overlay"></div>
 <div id="toast" role="status" aria-live="polite"></div>
@@ -48,9 +48,15 @@
       GET /api/products/:id                    one product with its variants, images and reviews
       GET /api/sellers                         seller names and ratings
       GET /api/admin/reports/top-products      units sold, for "Most ordered"
+      POST /api/customers/login                log in (email + password)
+      POST /api/customers/register             create an account
+      GET /api/customers/:id                   the logged-in customer (after a page refresh)
+      GET /api/customers/:id/addresses         saved addresses, on the profile page
   - The page keeps a copy of what it loaded and draws itself from it (render).
-  - Connected so far: browsing and search (step 5.1), product details (step 5.2).
-    Accounts, cart, wishlist, checkout and orders are connected in the next steps.
+  - The logged-in customer's ID is remembered in this browser (localStorage), so a
+    refresh keeps you logged in. Logging out forgets it.
+  - Connected so far: browsing and search (5.1), product details (5.2), accounts (5.3).
+    Cart, wishlist, checkout and orders are connected in the next steps.
 */
 (function () {
 'use strict';
@@ -60,6 +66,7 @@ const $ = s => document.querySelector(s);
 const ico = (paths, size) => '<svg viewBox="0 0 24 24" width="' + (size || 24) + '" height="' + (size || 24) + '" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + paths + '</svg>';
 const COLORS = { 'Electronics': '#2F4B9B', 'Fashion': '#B23A5A', 'Home & Kitchen': '#52702F', 'Books': '#6B3FA0', 'Sports & Outdoors': '#B8501A', 'Beauty & Personal Care': '#0E7C7B', 'Bath & Body': '#8A6A1F' };
 const SORTS = [['featured', 'Featured'], ['price-asc', 'Price, low to high'], ['price-desc', 'Price, high to low'], ['rating', 'Top rated']];
+const SAVED_LOGIN = 'shopsphere-customer';   // localStorage key holding the logged-in CustomerID
 
 // ---------- what the page has loaded from the API ----------
 let cats = {}, catList = [];      // Category rows, by id
@@ -72,8 +79,12 @@ const state = {
   view: 'home', query: '', cat: 0, sort: 'featured',
   results: null, searching: false, // product ids matching the search box / category, from the API
   menuOpen: {}, overlay: null,
-  modal: null                      // the open product: { pid, detail, vid, img, qty }
+  modal: null,                     // the open product: { pid, detail, vid, img, qty }
+  customer: null,                  // after logging in: { CustomerID, Name, Email, Phone, CreatedAt }
+  addresses: [],                   // the customer's saved addresses
+  form: {}                         // what is typed in the log-in / sign-up dialog
 };
+const cid = () => state.customer && state.customer.CustomerID;
 
 // A vw_ProductCatalog row, in the shape the page uses.
 const toProduct = r => ({
@@ -260,6 +271,37 @@ function productDialog() {
   '</section></div>';
 }
 
+// ---------- account: profile page, log-in and sign-up dialogs ----------
+function profileView() {
+  const c = state.customer;
+  return '<section class="profile"><div class="profile-head"><span class="avatar-big" aria-hidden="true">' + esc(c.Name[0].toUpperCase()) + '</span><div><h1>' + esc(c.Name) + '</h1><p class="muted">' + esc(c.Email) + (c.Phone ? ', ' + esc(c.Phone) : '') + '</p>' + (c.CreatedAt ? '<p class="muted">Customer since ' + fmtDate(c.CreatedAt) + '</p>' : '') + '</div></div>' +
+    '<h2>Saved addresses</h2>' + (state.addresses.length ? state.addresses.map(a => '<div class="addr">' + esc(a.Line1) + ', ' + esc(a.City) + (a.PostalCode ? ' ' + esc(a.PostalCode) : '') + ', ' + esc(a.Country) + ' <span class="muted">(' + esc(a.AddressType) + ')</span></div>').join('') : '<p class="muted">No saved address yet. You can add one at checkout.</p>') +
+    '<div class="row" style="margin-top:20px"><button class="btn danger" data-act="logout">Log out</button></div></section>';
+}
+function loginDialog() {
+  const f = state.form;
+  return '<div class="backdrop" data-act="backdrop"><section class="dialog narrow" role="dialog" aria-modal="true" aria-labelledby="li-title" tabindex="-1">' +
+    '<button class="x" data-act="close" aria-label="Close">×</button><h2 id="li-title" style="margin-bottom:6px">Log in</h2>' +
+    (f.notice ? '<p class="muted">' + esc(f.notice) + '</p>' : '') +
+    '<div class="field"><label for="li-email"><span>Email</span></label><input id="li-email" type="email" autocomplete="email" data-enter data-bind="form.email" value="' + esc(f.email) + '"></div>' +
+    '<div class="field"><label for="li-pass"><span>Password</span></label><input id="li-pass" type="password" autocomplete="current-password" data-enter data-bind="form.password" value="' + esc(f.password) + '"></div>' +
+    (f.error ? '<p class="err">' + esc(f.error) + '</p>' : '') +
+    '<button class="btn primary" style="width:100%;margin-top:6px" data-primary data-act="login"' + (f.busy ? ' disabled' : '') + '>' + (f.busy ? 'Logging in…' : 'Log in') + '</button>' +
+    '<p class="muted" style="margin-top:14px">New to ShopSphere? <button class="link" data-act="signup-open">Create an account</button></p>' +
+    '<p class="muted">Sample accounts from the database: for example <b>ali.raza@example.com</b> with password <b>hashed_pw_001</b> (customer 2 uses hashed_pw_002, and so on).</p></section></div>';
+}
+function signupDialog() {
+  const f = state.form;
+  const fld = (id, label, type, bind, auto) => '<div class="field"><label for="' + id + '"><span>' + label + '</span></label><input id="' + id + '" type="' + type + '" autocomplete="' + auto + '" data-enter data-bind="form.' + bind + '" value="' + esc(f[bind]) + '"></div>';
+  return '<div class="backdrop" data-act="backdrop"><section class="dialog narrow" role="dialog" aria-modal="true" aria-labelledby="su-title" tabindex="-1">' +
+    '<button class="x" data-act="close" aria-label="Close">×</button><h2 id="su-title" style="margin-bottom:6px">Create your account</h2>' +
+    fld('su-name', 'Full name', 'text', 'name', 'name') + fld('su-email', 'Email', 'email', 'email', 'email') + fld('su-phone', 'Phone (optional)', 'tel', 'phone', 'tel') +
+    fld('su-pass', 'Password (at least 8 characters)', 'password', 'password', 'new-password') + fld('su-confirm', 'Confirm password', 'password', 'confirm', 'new-password') +
+    (f.error ? '<p class="err">' + esc(f.error) + '</p>' : '') +
+    '<button class="btn primary" style="width:100%;margin-top:6px" data-primary data-act="signup"' + (f.busy ? ' disabled' : '') + '>' + (f.busy ? 'Creating your account…' : 'Create account') + '</button>' +
+    '<p class="muted" style="margin-top:14px">Already have an account? <button class="link" data-act="login-open">Log in</button></p></section></div>';
+}
+
 // ---------- category menu ----------
 // The menu lists the main categories. A main category with subcategories opens as a dropdown.
 const CHEVRON = '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>';
@@ -284,9 +326,15 @@ let lastOverlayKey = '';
 function render() {
   const active = document.activeElement;
   const keep = active && active.dataset && active.dataset.act ? '[data-act="' + active.dataset.act + '"]' + (active.dataset.id ? '[data-id="' + active.dataset.id + '"]' : '') : null;
-  $('#account').innerHTML = '<button class="badge" data-act="later" data-what="Logging in" aria-label="Log in">' + ico('<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/>', 22) + '<span class="tip" aria-hidden="true">Log in</span></button>';
+  // top right: the customer's initial when logged in (name shows on hover), otherwise a log-in icon
+  const name = cid() ? state.customer.Name : '';
+  $('#account').innerHTML = cid() ?
+    '<button class="badge in" data-act="profile-open" aria-label="Profile: ' + esc(name) + '">' + esc(name[0].toUpperCase()) + '<span class="tip" aria-hidden="true">' + esc(name) + '</span></button>' :
+    '<button class="badge" data-act="login-open" aria-label="Log in">' + ico('<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/>', 22) + '<span class="tip" aria-hidden="true">Log in</span></button>';
   document.querySelectorAll('.dock [data-view]').forEach(b => b.setAttribute('aria-current', (b.dataset.view === state.view || (b.dataset.view === 'home' && state.view === 'shop')) ? 'page' : 'false'));
-  const views = { home: homeView, shop: shopView };
+  $('.dock [data-act="profile-open"]').setAttribute('aria-current', state.view === 'profile' ? 'page' : 'false');
+  if (state.view === 'profile' && !cid()) state.view = 'home';     // logged out while on the profile
+  const views = { home: homeView, shop: shopView, profile: profileView };
   $('#main').innerHTML = state.loadError ?
       '<div class="empty"><h2>The shop could not load</h2><p>' + esc(state.loadError) + '</p><button class="btn primary" data-act="retry">Try again</button></div>' :
     !state.ready ? loading('Loading the shop…') : (views[state.view] || homeView)();
@@ -294,12 +342,15 @@ function render() {
   const key = state.overlay ? state.overlay + (state.modal ? state.modal.pid : '') : '';
   const ov = $('#overlay'), oldBox = ov.querySelector('[tabindex="-1"]');
   const keepTop = oldBox && key && key === lastOverlayKey ? oldBox.scrollTop : 0;
-  const overlays = { menu: menuDrawer, product: productDialog };
+  const overlays = { menu: menuDrawer, product: productDialog, login: loginDialog, signup: signupDialog };
   ov.innerHTML = overlays[state.overlay] ? overlays[state.overlay]() : '';
   document.body.classList.toggle('locked', !!state.overlay);
   const box = ov.querySelector('[tabindex="-1"]');
   if (box && keepTop) box.scrollTop = keepTop;
-  if (key && key !== lastOverlayKey) { if (box) box.focus(); }          // a new dialog: focus it
+  if (key && key !== lastOverlayKey) {                    // a new dialog: focus its first box, or the dialog
+    const first = (state.overlay === 'login' || state.overlay === 'signup') && box ? box.querySelector('input') : null;
+    if (first || box) (first || box).focus();
+  }
   else if (keep && state.overlay) { const el = ov.querySelector(keep); if (el) el.focus(); }
   else if (keep) { const el = document.querySelector(keep); if (el) el.focus(); }
   lastOverlayKey = key;
@@ -312,6 +363,66 @@ function toast(msg) {
 function closeOverlay() { state.overlay = null; state.modal = null; }
 function showView(v) { state.view = v; closeOverlay(); render(); window.scrollTo(0, 0); }
 function clearSearch() { state.query = ''; $('#q').value = ''; }
+
+// Runs one action at a time, so a double click cannot send the same request twice.
+let busy = false;
+async function once(fn) {
+  if (busy) return;
+  busy = true;
+  try { await fn(); } catch (e) { toast(e.message); render(); } finally { busy = false; }
+}
+
+// ---------- logging in and out ----------
+const newForm = () => ({ name: '', email: '', phone: '', password: '', confirm: '', error: '', notice: '', busy: false });
+function openLogin(notice) { state.form = newForm(); state.form.notice = notice || ''; state.modal = null; state.overlay = 'login'; render(); }
+
+// After logging in, signing up, or a page refresh: remember the customer and load their data.
+async function signIn(customer, greeting) {
+  state.customer = customer;
+  try { localStorage.setItem(SAVED_LOGIN, String(customer.CustomerID)); } catch (e) { /* private window */ }
+  closeOverlay(); render();
+  state.addresses = await api.get('/customers/' + customer.CustomerID + '/addresses');
+  render();
+  if (greeting) toast(greeting + customer.Name.split(' ')[0]);
+}
+// POST /api/customers/login. The API answers 401 if no customer has this email and password.
+async function doLogin() {
+  const f = state.form, email = (f.email || '').trim();
+  if (!email || !f.password) { f.error = 'Enter your email and password.'; render(); return; }
+  f.busy = true; f.error = ''; render();
+  try {
+    const customer = await api.post('/customers/login', { email: email, password: f.password });
+    await signIn(customer, 'Welcome back, ');
+  } catch (e) {
+    f.busy = false; f.error = e.status === 401 ? 'The email or password is not right.' : e.message; render();
+  }
+}
+// POST /api/customers/register. The API answers 409 if the email is already registered
+// (UNIQUE constraint on Customer.Email).
+async function doSignup() {
+  const f = state.form, name = f.name.trim(), email = f.email.trim().toLowerCase();
+  if (!name || !email || !f.password) f.error = 'Fill in your name, email and password.';
+  else if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) f.error = 'Enter a valid email address.';
+  else if (f.password.length < 8) f.error = 'Use at least 8 characters for the password.';
+  else if (f.password !== f.confirm) f.error = 'The two passwords do not match.';
+  else {
+    f.busy = true; f.error = ''; render();
+    try {
+      const customer = await api.post('/customers/register', { name: name, email: email, password: f.password, phone: f.phone.trim() || null });
+      await signIn(customer, 'Account created. Welcome, ');
+      return;
+    } catch (e) {
+      f.busy = false;
+      f.error = e.status === 409 ? 'An account with this email already exists. Try logging in.' : e.message;
+    }
+  }
+  render();
+}
+function logout() {
+  try { localStorage.removeItem(SAVED_LOGIN); } catch (e) { /* ignore */ }
+  state.customer = null; state.addresses = [];
+  showView('home'); toast('Logged out');
+}
 
 // ---------- events ----------
 document.addEventListener('click', e => {
@@ -340,25 +451,42 @@ document.addEventListener('click', e => {
       const v = state.modal.detail && state.modal.detail.variants.find(x => x.VariantID === state.modal.vid);
       state.modal.qty = Math.min(Math.max(1, v ? v.StockQty : 1), state.modal.qty + 1); render(); break;
     }
+    // account
+    case 'login-open': openLogin(); break;
+    case 'signup-open': state.form = newForm(); state.modal = null; state.overlay = 'signup'; render(); break;
+    case 'login': once(doLogin); break;
+    case 'signup': once(doSignup); break;
+    case 'logout': logout(); break;
+    case 'profile-open': if (!cid()) openLogin('Log in to see your profile.'); else showView('profile'); break;
     // Connected in the next steps
     case 'cart-open': toast('The cart comes in a later step.'); break;
     case 'later': toast(el.dataset.what + ' comes in a later step.'); break;
   }
 });
+// data-bind="form.email" means: keep state.form.email equal to what is typed in this box.
+function setPath(path, val) {
+  const keys = path.split('.'); let o = state;
+  for (let i = 0; i < keys.length - 1; i++) o = o[keys[i]];
+  o[keys[keys.length - 1]] = val;
+}
 document.addEventListener('input', e => {
   const t = e.target;
   if (t.id === 'q') {
     state.query = t.value; closeOverlay();
     if (state.view !== 'shop') state.view = 'shop';
     search(250);                                          // wait until typing pauses
-    render();
+    render(); return;
   }
+  if (t.dataset.bind && t.tagName !== 'SELECT') setPath(t.dataset.bind, t.value);
 });
 document.addEventListener('change', e => {
-  if (e.target.dataset.bind === 'sort') { state.sort = e.target.value; render(); }
+  const t = e.target;
+  if (t.dataset.bind && t.tagName === 'SELECT') { setPath(t.dataset.bind, t.value); render(); }
 });
 document.addEventListener('keydown', e => {
   if (!state.overlay) return;
+  // Enter in a log-in / sign-up box presses the dialog's main button
+  if (e.key === 'Enter' && e.target.dataset && e.target.dataset.enter !== undefined) { e.preventDefault(); const b = $('#overlay [data-primary]'); if (b) b.click(); return; }
   if (e.key === 'Escape') { closeOverlay(); render(); return; }
   if (e.key === 'Tab') {                                  // keep the keyboard inside the open menu or dialog
     const box = $('#overlay [tabindex="-1"]'); if (!box) return;
@@ -376,8 +504,15 @@ async function start() {
   try {
     await loadCatalog();
     state.ready = true;
-  } catch (e) { state.loadError = e.message; }
+  } catch (e) { state.loadError = e.message; render(); return; }
   render();
+  // Log back in the customer this browser remembers (GET /api/customers/:id).
+  let saved = null;
+  try { saved = localStorage.getItem(SAVED_LOGIN); } catch (e) { /* private window */ }
+  if (saved && !cid()) {
+    try { await signIn(await api.get('/customers/' + Number(saved)), ''); }
+    catch (e) { try { localStorage.removeItem(SAVED_LOGIN); } catch (e2) { /* ignore */ } }
+  }
 }
 start();
 })();
