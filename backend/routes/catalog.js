@@ -13,6 +13,12 @@ router.get('/categories', async (req, res) => {
   res.json(rows);
 });
 
+// GET /api/sellers
+// All sellers (shown on product pages and in the admin's add-product form).
+router.get('/sellers', async (req, res) => {
+  res.json(await query('SELECT SellerID, StoreName, Rating FROM Seller ORDER BY StoreName'));
+});
+
 // GET /api/products?search=laptop&categoryId=1
 // Browse or search the catalog (uses the view vw_ProductCatalog).
 // categoryId also matches that category's subcategories.
@@ -50,7 +56,7 @@ router.get('/products/:id', async (req, res) => {
      FROM ProductImage WHERE ProductID = @id ORDER BY IsPrimary DESC, ImageID`, { id });
 
   product.reviews = await query(
-    `SELECT r.ReviewID, c.Name AS CustomerName, r.Rating, r.Comment, r.ReviewDate
+    `SELECT r.ReviewID, r.CustomerID, c.Name AS CustomerName, r.Rating, r.Comment, r.ReviewDate
      FROM Review r JOIN Customer c ON r.CustomerID = c.CustomerID
      WHERE r.ProductID = @id ORDER BY r.ReviewDate DESC`, { id });
 
