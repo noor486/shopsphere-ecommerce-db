@@ -26,10 +26,10 @@
   </div>
 </div>
 <main id="main"></main>
-<footer>ShopSphere is a student project. Products, categories and accounts are read from and saved to the project's SQL Server database through the ShopSphere API.</footer>
+<footer>ShopSphere is a student project. Everything on this page is read from and saved to the project's SQL Server database through the ShopSphere API.</footer>
 <nav class="dock" aria-label="Main">
   <button data-act="nav" data-view="home"><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><path d="M3 11l9-8 9 8v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>Home</button>
-  <button data-act="later" data-what="The wishlist"><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>Wishlist<span class="count" id="n-wish" hidden>0</span></button>
+  <button data-act="nav" data-view="wishlist"><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>Wishlist<span class="count" id="n-wish" hidden>0</span></button>
   <button data-act="later" data-what="My orders"><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><path d="M21 8l-9-5-9 5v8l9 5 9-5z"/><path d="M3 8l9 5 9-5M12 13v8"/></svg>My orders</button>
   <button data-act="profile-open"><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>Profile</button>
 </nav>
@@ -52,11 +52,12 @@
       POST /api/customers/register             create an account
       GET /api/customers/:id                   the logged-in customer (after a page refresh)
       GET /api/customers/:id/addresses         saved addresses, on the profile page
+      GET/POST/DELETE /api/customers/:id/wishlist   the wishlist (WishlistItem table)
   - The page keeps a copy of what it loaded and draws itself from it (render).
   - The logged-in customer's ID is remembered in this browser (localStorage), so a
     refresh keeps you logged in. Logging out forgets it.
-  - Connected so far: browsing and search (5.1), product details (5.2), accounts (5.3).
-    Cart, wishlist, checkout and orders are connected in the next steps.
+  - Connected so far: browsing and search (5.1), product details (5.2), accounts (5.3),
+    wishlist (5.4). Cart, checkout and orders are connected in the next steps.
 */
 (function () {
 'use strict';
@@ -82,6 +83,7 @@ const state = {
   modal: null,                     // the open product: { pid, detail, vid, img, qty }
   customer: null,                  // after logging in: { CustomerID, Name, Email, Phone, CreatedAt }
   addresses: [],                   // the customer's saved addresses
+  wish: [],                        // ProductIDs in the customer's wishlist
   form: {}                         // what is typed in the log-in / sign-up dialog
 };
 const cid = () => state.customer && state.customer.CustomerID;
@@ -163,7 +165,9 @@ function search(delay) {
 }
 
 // ---------- cards ----------
+const HEART = '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>';
 function cardHTML(p, note) {
+  const wished = state.wish.includes(p.id);
   return '<article class="card">' +
     '<button class="card-main" data-act="open" data-id="' + p.id + '">' +
       '<span class="tile" style="background:' + colorOf(p) + '">' + esc(initials(p.name)) + (p.image ? PIC(imgSrc(p.image)) : '') +
@@ -175,6 +179,7 @@ function cardHTML(p, note) {
         '<span class="rating">' + ratingText(p.reviews, p.rating, ' (') + (p.reviews ? ')' : '') + '</span>' +
         (note ? '<span class="note">' + esc(note) + '</span>' : '') +
       '</span></button>' +
+    '<button class="heart' + (wished ? ' on' : '') + '" data-act="wish" data-id="' + p.id + '" aria-pressed="' + wished + '" aria-label="' + (wished ? 'Remove from' : 'Save to') + ' wishlist: ' + esc(p.name) + '">' + HEART + '</button>' +
   '</article>';
 }
 const loading = text => '<p class="loading">' + esc(text || 'Loading…') + '</p>';
@@ -226,6 +231,15 @@ function shopView() {
       '<div class="empty"><h2>No products found</h2><p>Try a shorter word or pick another category.</p><button class="btn" data-act="clear">Clear search and filters</button></div>');
 }
 
+// ---------- wishlist ----------
+const guestPrompt = (title, msg) => '<div class="empty"><h2>' + title + '</h2><p>' + msg + '</p><button class="btn primary" data-act="login-open">Log in</button> <button class="btn" data-act="signup-open">Create an account</button></div>';
+function wishView() {
+  if (!cid()) return guestPrompt('Log in to use your wishlist', 'Saved products are kept in your account.');
+  const list = state.wish.map(id => prods[id]).filter(Boolean);
+  if (!list.length) return '<div class="empty"><h2>Your wishlist is empty</h2><p>Tap the heart on any product to save it here.</p><button class="btn primary" data-act="nav" data-view="shop">Browse the shop</button></div>';
+  return '<div class="shop-head"><h1>Wishlist</h1></div><div class="toolbar"><p class="count">' + list.length + ' saved product' + (list.length === 1 ? '' : 's') + '</p></div><div class="grid">' + list.map(p => cardHTML(p)).join('') + '</div>';
+}
+
 // ---------- product details ----------
 // Opens over the page. The product's row from vw_ProductCatalog (already loaded) shows the
 // name and colour at once; GET /api/products/:id then brings the variants, images and reviews.
@@ -250,6 +264,7 @@ function productDialog() {
   const v = d.variants.find(x => x.VariantID === m.vid), left = v ? v.StockQty : 0;
   const s = sellers[d.SellerID], pics = d.images.map(i => imgSrc(i.URL)), similar = similarTo(p);
   const rating = d.AvgRating == null ? 0 : Number(d.AvgRating);
+  const wished = state.wish.includes(p.id);
   const opts = d.variants.map(x => '<button class="opt" data-act="variant" data-id="' + x.VariantID + '" aria-pressed="' + (x.VariantID === m.vid) + '"' + (x.StockQty === 0 ? ' disabled' : '') + '>' + esc(vLabel(x)) + '<small>' + money(x.Price) + (x.StockQty === 0 ? ', sold out' : '') + '</small></button>').join('');
   const stockText = !v ? 'Not available yet' : left === 0 ? 'Sold out' : left < 10 ? 'Only ' + left + ' left' : left + ' in stock';
   const revList = d.reviews.length ? d.reviews.map(x => '<div class="review"><span aria-hidden="true" style="color:var(--saffron-deep)">' + stars(x.Rating) + '</span> <span class="sr">' + x.Rating + ' out of 5</span> <b>' + esc(x.CustomerName) + '</b> <span class="muted">' + fmtDate(x.ReviewDate) + '</span><br>' + esc(x.Comment) + '</div>').join('') : '<p class="muted">No reviews yet.</p>';
@@ -264,7 +279,7 @@ function productDialog() {
       '<p class="stock' + (left < 10 ? ' low' : '') + '">' + stockText + (v ? ' <span class="muted">(code ' + esc(v.SKU) + ')</span>' : '') + '</p>' +
       '<div class="row"><div class="stepper" role="group" aria-label="Quantity"><button data-act="qty-dec" aria-label="Decrease quantity">−</button><span>' + m.qty + '</span><button data-act="qty-inc" aria-label="Increase quantity">+</button></div>' +
       '<button class="btn primary" data-act="later" data-what="Adding to the cart"' + (left === 0 ? ' disabled' : '') + '>Add to cart, ' + money((v ? v.Price : 0) * m.qty) + '</button>' +
-      '<button class="btn" data-act="later" data-what="The wishlist">Save to wishlist</button></div>' +
+      '<button class="btn" data-act="wish" data-id="' + p.id + '" aria-pressed="' + wished + '">' + (wished ? 'Remove from wishlist' : 'Save to wishlist') + '</button></div>' +
     '</div></div>' +
     (similar.length ? '<div class="similar"><h3>You may also like</h3><div class="grid small">' + similar.map(x => cardHTML(x)).join('') + '</div></div>' : '') +
     '<div class="reviews"><h3>Reviews</h3>' + revList + '<p class="muted" style="margin-top:14px">Writing a review comes in a later step.</p></div>' +
@@ -333,8 +348,9 @@ function render() {
     '<button class="badge" data-act="login-open" aria-label="Log in">' + ico('<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/>', 22) + '<span class="tip" aria-hidden="true">Log in</span></button>';
   document.querySelectorAll('.dock [data-view]').forEach(b => b.setAttribute('aria-current', (b.dataset.view === state.view || (b.dataset.view === 'home' && state.view === 'shop')) ? 'page' : 'false'));
   $('.dock [data-act="profile-open"]').setAttribute('aria-current', state.view === 'profile' ? 'page' : 'false');
+  $('#n-wish').hidden = state.wish.length === 0; $('#n-wish').textContent = state.wish.length;
   if (state.view === 'profile' && !cid()) state.view = 'home';     // logged out while on the profile
-  const views = { home: homeView, shop: shopView, profile: profileView };
+  const views = { home: homeView, shop: shopView, profile: profileView, wishlist: wishView };
   $('#main').innerHTML = state.loadError ?
       '<div class="empty"><h2>The shop could not load</h2><p>' + esc(state.loadError) + '</p><button class="btn primary" data-act="retry">Try again</button></div>' :
     !state.ready ? loading('Loading the shop…') : (views[state.view] || homeView)();
@@ -381,7 +397,10 @@ async function signIn(customer, greeting) {
   state.customer = customer;
   try { localStorage.setItem(SAVED_LOGIN, String(customer.CustomerID)); } catch (e) { /* private window */ }
   closeOverlay(); render();
-  state.addresses = await api.get('/customers/' + customer.CustomerID + '/addresses');
+  const [addresses, wish] = await Promise.all([
+    api.get('/customers/' + customer.CustomerID + '/addresses'), api.get('/customers/' + customer.CustomerID + '/wishlist')]);
+  state.addresses = addresses;
+  state.wish = wish.map(w => w.ProductID);
   render();
   if (greeting) toast(greeting + customer.Name.split(' ')[0]);
 }
@@ -420,8 +439,24 @@ async function doSignup() {
 }
 function logout() {
   try { localStorage.removeItem(SAVED_LOGIN); } catch (e) { /* ignore */ }
-  state.customer = null; state.addresses = [];
+  state.customer = null; state.addresses = []; state.wish = [];
   showView('home'); toast('Logged out');
+}
+
+// ---------- wishlist ----------
+// Heart on a card, or the button in the product details. Saved in the WishlistItem table:
+// POST adds a row, DELETE removes it. (UNIQUE (CustomerID, ProductID) stops duplicates.)
+async function toggleWish(pid) {
+  if (!cid()) { openLogin('Log in to save products to your wishlist.'); return; }
+  const path = '/customers/' + cid() + '/wishlist';
+  if (state.wish.includes(pid)) {
+    await api.del(path + '/' + pid);
+    state.wish = state.wish.filter(x => x !== pid); toast('Removed from wishlist');
+  } else {
+    await api.post(path, { productId: pid });
+    state.wish.push(pid); toast('Saved to wishlist');
+  }
+  render();
 }
 
 // ---------- events ----------
@@ -451,6 +486,8 @@ document.addEventListener('click', e => {
       const v = state.modal.detail && state.modal.detail.variants.find(x => x.VariantID === state.modal.vid);
       state.modal.qty = Math.min(Math.max(1, v ? v.StockQty : 1), state.modal.qty + 1); render(); break;
     }
+    // wishlist
+    case 'wish': once(() => toggleWish(id)); break;
     // account
     case 'login-open': openLogin(); break;
     case 'signup-open': state.form = newForm(); state.modal = null; state.overlay = 'signup'; render(); break;
