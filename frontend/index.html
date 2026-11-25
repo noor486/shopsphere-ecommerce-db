@@ -53,11 +53,15 @@
       GET /api/customers/:id                   the logged-in customer (after a page refresh)
       GET /api/customers/:id/addresses         saved addresses, on the profile page
       GET/POST/DELETE /api/customers/:id/wishlist   the wishlist (WishlistItem table)
+      GET /api/customers/:id/cart              the cart lines (Cart + CartItem tables)
+      POST /api/customers/:id/cart             add to cart, using the stored procedure sp_AddToCart
+      PUT/DELETE /api/customers/:id/cart/:variantId   change a line's quantity / remove it
+      GET /api/coupons/:code                   check a coupon code before checkout
   - The page keeps a copy of what it loaded and draws itself from it (render).
   - The logged-in customer's ID is remembered in this browser (localStorage), so a
     refresh keeps you logged in. Logging out forgets it.
   - Connected so far: browsing and search (5.1), product details (5.2), accounts (5.3),
-    wishlist (5.4). Cart, checkout and orders are connected in the next steps.
+    wishlist (5.4), cart and coupons (5.5). Checkout and orders come in the next steps.
 */
 (function () {
 'use strict';
@@ -84,6 +88,8 @@ const state = {
   customer: null,                  // after logging in: { CustomerID, Name, Email, Phone, CreatedAt }
   addresses: [],                   // the customer's saved addresses
   wish: [],                        // ProductIDs in the customer's wishlist
+  cart: [],                        // cart lines: { VariantID, ProductName, Size, Color, Quantity, Price, LineTotal, StockQty }
+  coupon: null, couponInput: '', couponMsg: '',   // the coupon applied in the cart: { code, type, value }
   form: {}                         // what is typed in the log-in / sign-up dialog
 };
 const cid = () => state.customer && state.customer.CustomerID;
@@ -278,12 +284,36 @@ function productDialog() {
       (d.variants.length ? '<fieldset><legend>Choose a style</legend><div class="opts">' + opts + '</div></fieldset>' : '') +
       '<p class="stock' + (left < 10 ? ' low' : '') + '">' + stockText + (v ? ' <span class="muted">(code ' + esc(v.SKU) + ')</span>' : '') + '</p>' +
       '<div class="row"><div class="stepper" role="group" aria-label="Quantity"><button data-act="qty-dec" aria-label="Decrease quantity">−</button><span>' + m.qty + '</span><button data-act="qty-inc" aria-label="Increase quantity">+</button></div>' +
-      '<button class="btn primary" data-act="later" data-what="Adding to the cart"' + (left === 0 ? ' disabled' : '') + '>Add to cart, ' + money((v ? v.Price : 0) * m.qty) + '</button>' +
+      '<button class="btn primary" data-act="add"' + (left === 0 ? ' disabled' : '') + '>Add to cart, ' + money((v ? v.Price : 0) * m.qty) + '</button>' +
       '<button class="btn" data-act="wish" data-id="' + p.id + '" aria-pressed="' + wished + '">' + (wished ? 'Remove from wishlist' : 'Save to wishlist') + '</button></div>' +
     '</div></div>' +
     (similar.length ? '<div class="similar"><h3>You may also like</h3><div class="grid small">' + similar.map(x => cardHTML(x)).join('') + '</div></div>' : '') +
     '<div class="reviews"><h3>Reviews</h3>' + revList + '<p class="muted" style="margin-top:14px">Writing a review comes in a later step.</p></div>' +
   '</section></div>';
+}
+
+// ---------- cart drawer ----------
+// What the cart costs before checkout. The real total is worked out again by sp_PlaceOrder.
+function totals(lines, coupon) {
+  const sub = lines.reduce((s, l) => s + l.Quantity * Number(l.Price), 0);
+  const disc = coupon ? (coupon.type === 'Percentage' ? sub * coupon.value / 100 : Math.min(coupon.value, sub)) : 0;
+  return { sub: sub, disc: disc, total: sub - disc };
+}
+function cartDrawer() {
+  const lines = state.cart, t = totals(lines, state.coupon);
+  const body = lines.length ? lines.map(l =>
+    '<div class="line"><div><div class="name">' + esc(l.ProductName) + '</div><div class="muted">' + esc(vLabel(l)) + ', ' + money(l.Price) + ' each</div></div><div><b>' + money(l.LineTotal) + '</b></div>' +
+    '<div class="controls"><div class="stepper" role="group" aria-label="Quantity of ' + esc(l.ProductName) + '"><button data-act="line-dec" data-id="' + l.VariantID + '" aria-label="Decrease quantity">−</button><span>' + l.Quantity + '</span><button data-act="line-inc" data-id="' + l.VariantID + '" aria-label="Increase quantity">+</button></div>' +
+    '<button class="link" data-act="line-remove" data-id="' + l.VariantID + '">Remove</button></div></div>').join('') :
+    '<div class="empty" style="margin:32px auto"><h2>Your cart is empty</h2><p>Browse the shop and add something you like.</p><button class="btn primary" data-act="close">Keep shopping</button></div>';
+  const coupon = !lines.length ? '' : state.coupon ?
+    '<p class="ok">Code ' + esc(state.coupon.code) + ' applied (' + (state.coupon.type === 'Percentage' ? state.coupon.value + '% off' : money(state.coupon.value) + ' off') + ') <button class="link" data-act="coupon-remove">Remove code</button></p>' :
+    '<div class="coupon"><label class="sr" for="coupon-in">Coupon code</label><input id="coupon-in" placeholder="Coupon code" data-enter data-bind="couponInput" value="' + esc(state.couponInput) + '"><button class="btn" data-primary data-act="coupon-apply">Apply code</button></div>' + (state.couponMsg ? '<p class="err">' + esc(state.couponMsg) + '</p>' : '');
+  return '<div class="backdrop side" data-act="backdrop"><aside class="drawer" role="dialog" aria-modal="true" aria-labelledby="cart-title" tabindex="-1">' +
+    '<button class="x" data-act="close" aria-label="Close cart">×</button><h2 id="cart-title">Your cart</h2>' + body + coupon +
+    (lines.length ? '<div class="sum"><div><span>Subtotal</span><span>' + money(t.sub) + '</span></div>' + (t.disc ? '<div><span>Discount</span><span>−' + money(t.disc) + '</span></div>' : '') + '<div class="total"><span>Total</span><span>' + money(t.total) + '</span></div></div>' +
+      '<button class="btn primary" style="width:100%" data-act="later" data-what="Checkout">Go to checkout</button>' : '') +
+  '</aside></div>';
 }
 
 // ---------- account: profile page, log-in and sign-up dialogs ----------
@@ -349,6 +379,8 @@ function render() {
   document.querySelectorAll('.dock [data-view]').forEach(b => b.setAttribute('aria-current', (b.dataset.view === state.view || (b.dataset.view === 'home' && state.view === 'shop')) ? 'page' : 'false'));
   $('.dock [data-act="profile-open"]').setAttribute('aria-current', state.view === 'profile' ? 'page' : 'false');
   $('#n-wish').hidden = state.wish.length === 0; $('#n-wish').textContent = state.wish.length;
+  const cartN = state.cart.reduce((s, l) => s + l.Quantity, 0);    // number of items, not lines
+  $('#n-cart').hidden = cartN === 0; $('#n-cart').textContent = cartN;
   if (state.view === 'profile' && !cid()) state.view = 'home';     // logged out while on the profile
   const views = { home: homeView, shop: shopView, profile: profileView, wishlist: wishView };
   $('#main').innerHTML = state.loadError ?
@@ -358,7 +390,7 @@ function render() {
   const key = state.overlay ? state.overlay + (state.modal ? state.modal.pid : '') : '';
   const ov = $('#overlay'), oldBox = ov.querySelector('[tabindex="-1"]');
   const keepTop = oldBox && key && key === lastOverlayKey ? oldBox.scrollTop : 0;
-  const overlays = { menu: menuDrawer, product: productDialog, login: loginDialog, signup: signupDialog };
+  const overlays = { menu: menuDrawer, product: productDialog, login: loginDialog, signup: signupDialog, cart: cartDrawer };
   ov.innerHTML = overlays[state.overlay] ? overlays[state.overlay]() : '';
   document.body.classList.toggle('locked', !!state.overlay);
   const box = ov.querySelector('[tabindex="-1"]');
@@ -376,7 +408,7 @@ function toast(msg) {
   const t = $('#toast'); t.textContent = msg; t.classList.add('show');
   clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 2800);
 }
-function closeOverlay() { state.overlay = null; state.modal = null; }
+function closeOverlay() { state.overlay = null; state.modal = null; state.couponMsg = ''; }
 function showView(v) { state.view = v; closeOverlay(); render(); window.scrollTo(0, 0); }
 function clearSearch() { state.query = ''; $('#q').value = ''; }
 
@@ -397,10 +429,11 @@ async function signIn(customer, greeting) {
   state.customer = customer;
   try { localStorage.setItem(SAVED_LOGIN, String(customer.CustomerID)); } catch (e) { /* private window */ }
   closeOverlay(); render();
-  const [addresses, wish] = await Promise.all([
-    api.get('/customers/' + customer.CustomerID + '/addresses'), api.get('/customers/' + customer.CustomerID + '/wishlist')]);
+  const base = '/customers/' + customer.CustomerID;
+  const [addresses, wish, cart] = await Promise.all([api.get(base + '/addresses'), api.get(base + '/wishlist'), api.get(base + '/cart')]);
   state.addresses = addresses;
   state.wish = wish.map(w => w.ProductID);
+  state.cart = cart.items;
   render();
   if (greeting) toast(greeting + customer.Name.split(' ')[0]);
 }
@@ -439,8 +472,55 @@ async function doSignup() {
 }
 function logout() {
   try { localStorage.removeItem(SAVED_LOGIN); } catch (e) { /* ignore */ }
-  state.customer = null; state.addresses = []; state.wish = [];
+  state.customer = null; state.addresses = []; state.wish = []; state.cart = [];
+  state.coupon = null; state.couponInput = '';
   showView('home'); toast('Logged out');
+}
+
+// ---------- cart ----------
+// Every cart request answers with the whole cart again ({ items, total }), so the page
+// always shows exactly what is in the Cart and CartItem tables.
+const cartPath = () => '/customers/' + cid() + '/cart';
+
+// POST /cart runs sp_AddToCart: it creates the customer's cart if needed, adds to the
+// existing line if this variant is already in the cart, and refuses more than the stock
+// (THROW 50004 -> the API answers 400 "Not enough stock for this item.").
+async function addToCart() {
+  if (!cid()) { openLogin('Log in to add items to your cart.'); return; }
+  const m = state.modal;
+  if (!m.vid) return;
+  try {
+    const cart = await api.post(cartPath(), { variantId: m.vid, quantity: m.qty });
+    state.cart = cart.items; toast('Added to cart');
+  } catch (e) { toast(e.message); }
+  render();
+}
+// PUT sets a line's quantity (the API checks it against the stock); DELETE removes the line.
+async function changeLine(vid, delta) {
+  const line = state.cart.find(l => l.VariantID === vid);
+  if (!line || line.Quantity + delta < 1) return;
+  try { state.cart = (await api.put(cartPath() + '/' + vid, { quantity: line.Quantity + delta })).items; }
+  catch (e) { toast(e.message); }
+  render();
+}
+async function removeLine(vid) {
+  state.cart = (await api.del(cartPath() + '/' + vid)).items;
+  if (!state.cart.length) state.coupon = null;
+  render();
+}
+// GET /api/coupons/:code. 404 = no such code; IsValid = 0 when it has expired.
+// The coupon is only remembered here; sp_PlaceOrder checks it again and applies it at checkout.
+async function applyCoupon() {
+  const code = state.couponInput.trim();
+  if (!code) state.couponMsg = 'Type a coupon code first.';
+  else {
+    try {
+      const c = await api.get('/coupons/' + encodeURIComponent(code));
+      if (!c.IsValid) state.couponMsg = 'Code ' + c.Code + ' expired on ' + fmtDate(c.ExpiryDate) + '.';
+      else { state.coupon = { code: c.Code, type: c.DiscountType, value: Number(c.DiscountValue) }; state.couponMsg = ''; state.couponInput = ''; toast('Code applied'); }
+    } catch (e) { state.couponMsg = e.status === 404 ? 'That code does not exist.' : e.message; }
+  }
+  render();
 }
 
 // ---------- wishlist ----------
@@ -488,6 +568,14 @@ document.addEventListener('click', e => {
     }
     // wishlist
     case 'wish': once(() => toggleWish(id)); break;
+    // cart
+    case 'cart-open': if (!cid()) { openLogin('Log in to see your cart.'); break; } state.modal = null; state.overlay = 'cart'; render(); break;
+    case 'add': once(addToCart); break;
+    case 'line-inc': once(() => changeLine(id, 1)); break;
+    case 'line-dec': once(() => changeLine(id, -1)); break;
+    case 'line-remove': once(() => removeLine(id)); break;
+    case 'coupon-apply': once(applyCoupon); break;
+    case 'coupon-remove': state.coupon = null; render(); break;
     // account
     case 'login-open': openLogin(); break;
     case 'signup-open': state.form = newForm(); state.modal = null; state.overlay = 'signup'; render(); break;
@@ -496,7 +584,6 @@ document.addEventListener('click', e => {
     case 'logout': logout(); break;
     case 'profile-open': if (!cid()) openLogin('Log in to see your profile.'); else showView('profile'); break;
     // Connected in the next steps
-    case 'cart-open': toast('The cart comes in a later step.'); break;
     case 'later': toast(el.dataset.what + ' comes in a later step.'); break;
   }
 });
