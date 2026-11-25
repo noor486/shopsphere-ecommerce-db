@@ -1,0 +1,728 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ShopSphere</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=Source+Sans+3:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <button class="burger" data-act="menu-open" aria-label="Open menu"><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><path d="M3 6h18M3 12h18M3 18h18" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/></svg></button>
+  <button class="logo" data-act="nav" data-view="home">ShopSphere</button>
+  <div class="top-right">
+    <button class="cart-btn" data-act="cart-open" aria-label="Open cart"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M7 18c-1.1 0-1.99.9-1.99 2S5.9 22 7 22s2-.9 2-2-.9-2-2-2zM1 2v2h2l3.6 7.59-1.35 2.45c-.16.28-.25.61-.25.96 0 1.1.9 2 2 2h12v-2H7.42c-.14 0-.25-.11-.25-.25l.03-.12.9-1.63h7.45c.75 0 1.41-.41 1.75-1.03l3.58-6.49c.08-.14.12-.31.12-.48 0-.55-.45-1-1-1H5.21l-.94-2H1zm16 16c-1.1 0-1.99.9-1.99 2s.89 2 1.99 2 2-.9 2-2-.9-2-2-2z"/></svg><span class="pill" id="n-cart" hidden>0</span></button>
+    <div id="account"></div>
+  </div>
+</header>
+<div class="searchbar">
+  <div class="search">
+    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+    <label class="sr" for="q">Search products</label>
+    <input id="q" type="search" placeholder="Search for products" autocomplete="off">
+  </div>
+</div>
+<main id="main"></main>
+<footer>ShopSphere is a student project. Products, accounts, carts and orders are read from and saved to the project's SQL Server database through the ShopSphere API. <a href="admin.html">Admin pages</a></footer>
+<nav class="dock" aria-label="Main">
+  <button data-act="nav" data-view="home"><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><path d="M3 11l9-8 9 8v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>Home</button>
+  <button data-act="nav" data-view="wishlist"><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>Wishlist<span class="count" id="n-wish" hidden>0</span></button>
+  <button data-act="nav" data-view="orders"><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><path d="M21 8l-9-5-9 5v8l9 5 9-5z"/><path d="M3 8l9 5 9-5M12 13v8"/></svg>My orders</button>
+  <button data-act="profile-open"><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>Profile</button>
+</nav>
+<div id="overlay"></div>
+<div id="toast" role="status" aria-live="polite"></div>
+<noscript>This page needs JavaScript to show the shop.</noscript>
+
+<script src="api.js"></script>
+<script>
+/*
+  How this page works
+  - All data comes from the ShopSphere API (api.js), which reads SQL Server:
+      catalog     GET /api/categories, /api/products (vw_ProductCatalog), /api/products/:id, /api/sellers
+      account     POST /api/customers/register, /api/customers/login, GET /api/customers/:id/addresses
+      cart        GET/POST/PUT/DELETE /api/customers/:id/cart (adding uses sp_AddToCart)
+      wishlist    GET/POST/DELETE /api/customers/:id/wishlist
+      checkout    GET /api/coupons/:code, POST /api/customers/:id/orders (sp_PlaceOrder)
+      orders      GET /api/customers/:id/orders (vw_OrderSummary), /api/orders/:id, POST /api/orders/:id/cancel
+      reviews     POST /api/products/:id/reviews
+  - The page keeps a copy of what it last loaded in `state` and draws itself from it (render).
+    After every change it asks the API again, so what you see is what is in the database.
+  - The logged-in customer is remembered in this browser (localStorage), so a refresh keeps you logged in.
+*/
+(function () {
+'use strict';
+
+// ---------- small helpers ----------
+const $ = s => document.querySelector(s);
+const ico = (paths, size) => '<svg viewBox="0 0 24 24" width="' + (size || 24) + '" height="' + (size || 24) + '" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + paths + '</svg>';
+const METHODS = ['Credit Card', 'JazzCash', 'Easypaisa', 'Cash on Delivery', 'Bank Transfer'];
+const COLORS = { 'Electronics': '#2F4B9B', 'Fashion': '#B23A5A', 'Home & Kitchen': '#52702F', 'Books': '#6B3FA0', 'Sports & Outdoors': '#B8501A', 'Beauty & Personal Care': '#0E7C7B', 'Bath & Body': '#8A6A1F' };
+const SORTS = [['featured', 'Featured'], ['price-asc', 'Price, low to high'], ['price-desc', 'Price, high to low'], ['rating', 'Top rated']];
+const SAVED_LOGIN = 'shopsphere-customer';
+
+// ---------- what the page has loaded from the API ----------
+let cats = {}, catList = [];      // Category rows, by id
+let prods = {}, prodList = [];    // vw_ProductCatalog rows, by id
+let sellers = {};                 // Seller rows, by id
+let sold = {};                    // units sold per product (top-products report)
+
+const state = {
+  ready: false, loadError: '',
+  customer: null,                 // { CustomerID, Name, Email, Phone } after logging in
+  view: 'home', query: '', cat: 0, sort: 'featured',
+  results: null, searching: false, // product ids matching the search box / category, from the API
+  cart: [], wish: [], addresses: [], orders: [], ordersLoaded: false,
+  coupon: null, couponInput: '', couponMsg: '',
+  form: {}, menuOpen: {}, overlay: null, modal: null, checkout: null, confirm: null
+};
+const cid = () => state.customer && state.customer.CustomerID;
+
+// A vw_ProductCatalog row, in the shape the page uses.
+const toProduct = r => ({
+  id: r.ProductID, name: r.ProductName, description: r.Description,
+  categoryId: r.CategoryID, categoryName: r.CategoryName, sellerId: r.SellerID, sellerName: r.SellerName,
+  price: r.MinPrice == null ? Number(r.BasePrice) : Number(r.MinPrice),
+  stock: r.TotalStock, reviews: r.ReviewCount, rating: r.AvgRating == null ? 0 : Number(r.AvgRating), image: r.ImageURL
+});
+
+// ---------- categories ----------
+// One Category table holds everything. A category with no parent is a main category (Electronics).
+// A category with a parent is a subcategory (Mobiles belongs to Electronics).
+const topOf = id => { let c = cats[id]; while (c && c.parentId) c = cats[c.parentId]; return c; };
+const catPath = id => { const out = []; let c = cats[id]; while (c) { out.unshift(c.name); c = c.parentId ? cats[c.parentId] : null; } return out; };
+
+// ---------- products ----------
+const colorOf = p => COLORS[(topOf(p.categoryId) || {}).name] || '#12343B';
+const initials = n => n.split(/\s+/).filter(w => /^[A-Za-z]/.test(w)).slice(0, 2).map(w => w[0].toUpperCase()).join('');
+const vLabel = v => {
+  const parts = [];
+  if (v.Size && v.Size !== 'Standard' && v.Size !== 'N/A') parts.push(v.Size);
+  if (v.Color && v.Color !== 'N/A') parts.push(v.Color);
+  return parts.join(', ') || 'Standard';
+};
+// Pictures live in frontend/images/. ProductImage.URL holds the file name at the end
+// (https://images.shopsphere.example/p1-main.jpg -> images/p1-main.jpg). Without the file,
+// the card shows the coloured tile with the product's initials.
+const imgSrc = url => 'images/' + String(url).split('/').pop();
+const PIC = src => '<img class="pic" src="' + esc(src) + '" alt="" loading="lazy" onerror="this.remove()">';
+const stars = a => '★'.repeat(Math.round(a)) + '☆'.repeat(5 - Math.round(a));
+const ratingText = (n, avg, joiner) => n ? '<span aria-hidden="true">' + stars(avg) + '</span> ' + avg.toFixed(1) + joiner + n + ' review' + (n > 1 ? 's' : '') : 'No reviews yet';
+
+// Similar products: same category first, then the rest of the same main category, best rated first.
+function similarTo(p) {
+  const top = topOf(p.categoryId).id;
+  return prodList.filter(x => x.id !== p.id && topOf(x.categoryId).id === top)
+    .map(x => ({ x: x, score: (x.categoryId === p.categoryId ? 2 : 0) + x.rating / 10 }))
+    .sort((a, b) => b.score - a.score || a.x.name.localeCompare(b.x.name)).slice(0, 4).map(o => o.x);
+}
+
+// Cart total before checkout. The real total is worked out again by sp_PlaceOrder.
+function totals(lines, coupon) {
+  const sub = lines.reduce((s, l) => s + l.Quantity * Number(l.Price), 0);
+  const disc = coupon ? (coupon.type === 'Percentage' ? sub * coupon.value / 100 : Math.min(coupon.value, sub)) : 0;
+  return { sub: sub, disc: disc, total: sub - disc };
+}
+
+// ---------- loading from the API ----------
+async function loadCatalog() {
+  const [catRows, productRows, sellerRows, top] = await Promise.all([
+    api.get('/categories'), api.get('/products'), api.get('/sellers'), api.get('/admin/reports/top-products')]);
+  catList = catRows.map(c => ({ id: c.CategoryID, name: c.Name, parentId: c.ParentCategoryID }));
+  cats = Object.fromEntries(catList.map(c => [c.id, c]));
+  prodList = productRows.map(toProduct);
+  prods = Object.fromEntries(prodList.map(p => [p.id, p]));
+  sellers = Object.fromEntries(sellerRows.map(s => [s.SellerID, s]));
+  sold = Object.fromEntries(top.map(t => [t.ProductID, t.UnitsSold]));
+}
+
+// Stock, ratings and sales change after orders, cancels and reviews.
+async function refreshCatalog() {
+  try { await loadCatalog(); if (state.results) search(0); render(); } catch (e) { toast(e.message); }
+}
+
+// The search box and the category menu ask the API (GET /api/products?search=&categoryId=).
+let searchTimer, searchSeq = 0;
+function search(delay) {
+  clearTimeout(searchTimer);
+  const q = state.query.trim(), cat = state.cat;
+  if (!q && !cat) { state.results = null; state.searching = false; return; }
+  state.searching = true;
+  searchTimer = setTimeout(async () => {
+    const seq = ++searchSeq, params = new URLSearchParams();
+    if (q) params.set('search', q);
+    if (cat) params.set('categoryId', cat);
+    try {
+      const rows = await api.get('/products?' + params);
+      if (seq !== searchSeq) return;                      // a newer search has started
+      rows.forEach(r => { prods[r.ProductID] = toProduct(r); });
+      state.results = rows.map(r => r.ProductID);
+    } catch (e) {
+      if (seq !== searchSeq) return;
+      state.results = []; toast(e.message);
+    }
+    state.searching = false; render();
+  }, delay);
+}
+
+async function loadAccount() {
+  const id = cid();
+  const [cart, wish, addresses] = await Promise.all([
+    api.get('/customers/' + id + '/cart'), api.get('/customers/' + id + '/wishlist'), api.get('/customers/' + id + '/addresses')]);
+  state.cart = cart.items; state.wish = wish.map(w => w.ProductID); state.addresses = addresses;
+  await loadOrders();
+}
+// Order history: the list (vw_OrderSummary), then each order's items and payments.
+async function loadOrders() {
+  const id = cid();
+  const list = await api.get('/customers/' + id + '/orders');
+  const details = await Promise.all(list.map(o => api.get('/orders/' + o.OrderID)));
+  if (cid() !== id) return;                               // logged out meanwhile
+  state.orders = details; state.ordersLoaded = true;
+}
+
+// ---------- cards ----------
+const HEART = '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>';
+function cardHTML(p, note) {
+  const wished = state.wish.includes(p.id);
+  return '<article class="card">' +
+    '<button class="card-main" data-act="open" data-id="' + p.id + '">' +
+      '<span class="tile" style="background:' + colorOf(p) + '">' + esc(initials(p.name)) + (p.image ? PIC(imgSrc(p.image)) : '') +
+        (p.stock < 10 ? '<span class="badge-low">' + (p.stock === 0 ? 'Sold out' : 'Low stock') + '</span>' : '') +
+        '<span class="tag">' + money(p.price) + '</span></span>' +
+      '<span class="card-body">' +
+        '<span class="card-name">' + esc(p.name) + '</span>' +
+        '<span class="card-meta">' + esc(p.categoryName) + ', sold by ' + esc(p.sellerName) + '</span>' +
+        '<span class="rating">' + ratingText(p.reviews, p.rating, ' (') + (p.reviews ? ')' : '') + '</span>' +
+        (note ? '<span class="note">' + esc(note) + '</span>' : '') +
+      '</span></button>' +
+    '<button class="heart' + (wished ? ' on' : '') + '" data-act="wish" data-id="' + p.id + '" aria-pressed="' + wished + '" aria-label="' + (wished ? 'Remove from' : 'Save to') + ' wishlist: ' + esc(p.name) + '">' + HEART + '</button>' +
+  '</article>';
+}
+const loading = text => '<p class="loading">' + esc(text || 'Loading…') + '</p>';
+
+// ---------- home ----------
+const PERKS = [
+  [ico('<rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/>'), 'Pay your way', 'Card, JazzCash, Easypaisa, bank transfer or cash on delivery'],
+  [ico('<path d="M21 8l-9-5-9 5v8l9 5 9-5z"/><path d="M3 8l9 5 9-5M12 13v8"/>'), 'Follow your order', 'See the payment and shipment status of every order'],
+  [ico('<path d="M20 12l-8 8-9-9V3h8z"/><circle cx="7.5" cy="7.5" r="1.5"/>'), 'Coupon codes', 'Add a code at checkout to save on your order'],
+  [ico('<path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9z"/>'), 'Read the reviews', 'See what other shoppers think on every product page']
+];
+function homeView() {
+  const popular = prodList.filter(p => sold[p.id]).sort((a, b) => sold[b.id] - sold[a.id] || a.name.localeCompare(b.name)).slice(0, 4);
+  const best = prodList.filter(p => p.reviews > 0)
+    .sort((a, b) => b.rating - a.rating || b.reviews - a.reviews || a.name.localeCompare(b.name)).slice(0, 4);
+  const band = (title, sub, list, note) => list.length ? '<section class="band"><div class="band-head"><h2>' + title + '</h2><p>' + sub + '</p></div><div class="grid">' + list.map(p => cardHTML(p, note ? note(p) : '')).join('') + '</div></section>' : '';
+  return '<section class="hero"><div><h1>Everything you need, one cart away</h1>' +
+    '<div class="row"><button class="btn primary big" data-act="nav" data-view="shop">Start shopping</button><button class="btn big" data-act="menu-open">Browse categories</button></div></div>' +
+    '<div class="hero-art"><img src="images/hero.jpg" alt="" onerror="this.closest(\'.hero\').classList.add(\'no-art\');this.parentNode.remove()"></div></section>' +
+    '<div class="perks">' + PERKS.map(k => '<div class="perk">' + k[0] + '<div><b>' + k[1] + '</b><span>' + k[2] + '</span></div></div>').join('') + '</div>' +
+    band('Most ordered', 'What shoppers buy the most', popular, p => sold[p.id] + ' sold') +
+    band('Top rated', 'The products shoppers rated highest', best) +
+    '<section class="cta"><h2>Ready to look around?</h2><p>See every product, or start from a category.</p>' +
+    '<div class="row"><button class="btn primary big" data-act="nav" data-view="shop">See all products</button><button class="btn light big" data-act="menu-open">Browse categories</button></div></section>';
+}
+
+// ---------- shop ----------
+function visibleProducts() {
+  const list = state.results ? state.results.map(id => prods[id]).filter(Boolean) : prodList.slice();
+  if (state.sort === 'price-asc') list.sort((a, b) => a.price - b.price);
+  else if (state.sort === 'price-desc') list.sort((a, b) => b.price - a.price);
+  else if (state.sort === 'rating') list.sort((a, b) => b.rating - a.rating);
+  else if (!state.results) list.sort((a, b) => a.name.localeCompare(b.name));
+  return list;
+}
+function shopView() {
+  const q = state.query.trim(), path = state.cat ? catPath(state.cat) : [];
+  const title = q && !state.cat ? 'Search results' : state.cat ? path[path.length - 1] : 'All products';
+  const sortSel = SORTS.map(s => '<option value="' + s[0] + '"' + (state.sort === s[0] ? ' selected' : '') + '>' + s[1] + '</option>').join('');
+  const filters = (state.cat ? '<button class="pill-btn" data-act="clear-cat" aria-label="Remove category filter">' + esc(path.join(' / ')) + ' ×</button>' : '') +
+    (q ? '<button class="pill-btn" data-act="clear-q" aria-label="Remove search filter">“' + esc(q) + '” ×</button>' : '');
+  const head = '<div class="shop-head">' + (path.length > 1 ? '<p class="crumb">' + esc(path.slice(0, -1).join(' / ')) + '</p>' : '') + '<h1>' + esc(title) + '</h1>' + (filters ? '<div class="filters">' + filters + '</div>' : '') + '</div>';
+  if (state.searching && !state.results) return head + loading('Searching…');
+  const list = visibleProducts();
+  return head +
+    '<div class="toolbar">' + (state.cat || q ? '<p class="count">' + list.length + ' product' + (list.length === 1 ? '' : 's') + '</p>' : '<span></span>') +
+    '<label>Sort by <select data-bind="sort">' + sortSel + '</select></label></div>' +
+    (list.length ? '<div class="grid">' + list.map(p => cardHTML(p)).join('') + '</div>' :
+      '<div class="empty"><h2>No products found</h2><p>Try a shorter word or pick another category.</p><button class="btn" data-act="clear">Clear search and filters</button></div>');
+}
+
+// ---------- wishlist, orders, profile ----------
+const guestPrompt = (title, msg) => '<div class="empty"><h2>' + title + '</h2><p>' + msg + '</p><button class="btn primary" data-act="login-open">Log in</button> <button class="btn" data-act="signup-open">Create an account</button></div>';
+function wishView() {
+  if (!cid()) return guestPrompt('Log in to use your wishlist', 'Saved products are kept in your account.');
+  const list = state.wish.map(id => prods[id]).filter(Boolean);
+  if (!list.length) return '<div class="empty"><h2>Your wishlist is empty</h2><p>Tap the heart on any product to save it here.</p><button class="btn primary" data-act="nav" data-view="shop">Browse the shop</button></div>';
+  return '<div class="shop-head"><h1>Wishlist</h1></div><div class="toolbar"><p class="count">' + list.length + ' saved product' + (list.length === 1 ? '' : 's') + '</p></div><div class="grid">' + list.map(p => cardHTML(p)).join('') + '</div>';
+}
+function ordersView() {
+  if (!cid()) return guestPrompt('Log in to see your orders', 'Your orders are kept in your account.');
+  if (!state.ordersLoaded) return loading('Loading your orders…');
+  const mine = state.orders.slice().sort((a, b) => String(b.OrderDate).localeCompare(String(a.OrderDate)) || b.OrderID - a.OrderID);
+  if (!mine.length) return '<div class="empty"><h2>No orders yet</h2><p>Add something to the cart and check out.</p><button class="btn primary" data-act="nav" data-view="shop">Browse the shop</button></div>';
+  return '<div class="shop-head"><h1>My orders</h1></div>' + mine.map(o => {
+    const rows = o.items.map(i => '<tr><td>' + esc(i.ProductName) + '<br><small>' + esc(vLabel(i)) + '</small></td><td class="r">' + i.Quantity + '</td><td class="r">' + money(i.UnitPrice) + '</td><td class="r">' + money(i.LineTotal) + '</td></tr>').join('');
+    return '<section class="order"><div class="order-head"><h2>Order ' + o.OrderID + '</h2><span>' + fmtDate(o.OrderDate) + ' <span class="chip s-' + esc(o.OrderStatus) + '">' + esc(o.OrderStatus) + '</span></span></div>' +
+      '<table><thead><tr><th>Item</th><th class="r">Qty</th><th class="r">Price</th><th class="r">Total</th></tr></thead><tbody>' + rows + '</tbody></table>' +
+      '<div class="facts">' +
+        (o.CouponCode ? '<div>Coupon ' + esc(o.CouponCode) + ' saved you ' + money(o.Discount) + '</div>' : '') +
+        '<div><b>Order total: ' + money(o.TotalAmount) + '</b></div>' +
+        o.payments.map(p => '<div>Payment: ' + esc(p.Method) + ', ' + money(p.Amount) + ' <span class="chip s-' + esc(p.Status) + '">' + esc(p.Status) + '</span></div>').join('') +
+        (o.ShipmentStatus ? '<div>Shipment: <span class="chip s-' + esc(o.ShipmentStatus) + '">' + esc(o.ShipmentStatus) + '</span>' + (o.Carrier ? ' with ' + esc(o.Carrier) + (o.TrackingNumber ? ', tracking ' + esc(o.TrackingNumber) : '') : '') + '</div>' : '') +
+        (o.ShipToCity ? '<div>Ship to: ' + esc(o.ShipToCity) + '</div>' : '') +
+      '</div>' +
+      ((o.OrderStatus === 'Pending' || o.OrderStatus === 'Processing') ? '<div class="row"><button class="btn danger" data-act="cancel-order" data-id="' + o.OrderID + '">Cancel order</button></div>' : '') +
+    '</section>';
+  }).join('');
+}
+function profileView() {
+  const c = state.customer;
+  return '<section class="profile"><div class="profile-head"><span class="avatar-big" aria-hidden="true">' + esc(c.Name[0].toUpperCase()) + '</span><div><h1>' + esc(c.Name) + '</h1><p class="muted">' + esc(c.Email) + (c.Phone ? ', ' + esc(c.Phone) : '') + '</p></div></div>' +
+    '<div class="stats"><div><b>' + state.orders.length + '</b><span>Orders</span></div><div><b>' + state.wish.length + '</b><span>Wishlist</span></div><div><b>' + state.addresses.length + '</b><span>Addresses</span></div></div>' +
+    '<h2>Saved addresses</h2>' + (state.addresses.length ? state.addresses.map(a => '<div class="addr">' + esc(a.Line1) + ', ' + esc(a.City) + (a.PostalCode ? ' ' + esc(a.PostalCode) : '') + ', ' + esc(a.Country) + ' <span class="muted">(' + esc(a.AddressType) + ')</span></div>').join('') : '<p class="muted">No saved address yet. You can add one at checkout.</p>') +
+    '<div class="row" style="margin-top:20px"><button class="btn danger" data-act="logout">Log out</button></div></section>';
+}
+
+// ---------- overlays ----------
+function productDialog() {
+  const m = state.modal, p = prods[m.pid], d = m.detail;
+  const close = '<button class="x" data-act="close" aria-label="Close">×</button>';
+  if (!d) return '<div class="backdrop" data-act="backdrop"><section class="dialog" role="dialog" aria-modal="true" aria-label="Product" tabindex="-1">' + close + loading(m.error || 'Loading product…') + '</section></div>';
+  const v = d.variants.find(x => x.VariantID === m.vid), left = v ? v.StockQty : 0;
+  const s = sellers[d.SellerID], pics = d.images.map(i => imgSrc(i.URL)), similar = similarTo(p);
+  const mine = d.reviews.some(x => x.CustomerID === cid());
+  const wished = state.wish.includes(p.id);
+  const opts = d.variants.map(x => '<button class="opt" data-act="variant" data-id="' + x.VariantID + '" aria-pressed="' + (x.VariantID === m.vid) + '"' + (x.StockQty === 0 ? ' disabled' : '') + '>' + esc(vLabel(x)) + '<small>' + money(x.Price) + (x.StockQty === 0 ? ', sold out' : '') + '</small></button>').join('');
+  const stockText = !v ? 'Not available yet' : left === 0 ? 'Sold out' : left < 10 ? 'Only ' + left + ' left' : left + ' in stock';
+  const revList = d.reviews.length ? d.reviews.map(x => '<div class="review"><span aria-hidden="true" style="color:var(--saffron-deep)">' + stars(x.Rating) + '</span> <span class="sr">' + x.Rating + ' out of 5</span> <b>' + esc(x.CustomerName) + '</b> <span class="muted">' + fmtDate(x.ReviewDate) + '</span><br>' + esc(x.Comment) + '</div>').join('') : '<p class="muted">No reviews yet.</p>';
+  const form = !cid() ? '<p class="muted">Log in to write a review.</p><button class="btn" data-act="login-open">Log in</button>' : mine ? '<p class="muted">You have already reviewed this product.</p>' :
+    '<p class="muted">You can review a product once an order with it has been delivered to you.</p>' +
+    '<div class="field"><label for="rev-rating"><span>Your rating</span></label><select id="rev-rating" data-bind="modal.rating"><option value="">Choose a rating</option>' +
+      [5, 4, 3, 2, 1].map(n => '<option value="' + n + '"' + (String(m.rating) === String(n) ? ' selected' : '') + '>' + n + ' out of 5</option>').join('') + '</select></div>' +
+    '<div class="field"><label for="rev-text"><span>Your review</span></label><textarea id="rev-text" rows="3" data-bind="modal.text">' + esc(m.text) + '</textarea></div>' +
+    (m.reviewError ? '<p class="err">' + esc(m.reviewError) + '</p>' : '') +
+    '<button class="btn" data-act="review">Post review</button>';
+  const rating = d.AvgRating == null ? 0 : Number(d.AvgRating);
+  return '<div class="backdrop" data-act="backdrop"><section class="dialog" role="dialog" aria-modal="true" aria-labelledby="dlg-title" tabindex="-1">' + close +
+    '<div class="dlg-grid"><div class="dlg-media"><div class="dlg-tile" style="background:' + colorOf(p) + '">' + esc(initials(p.name)) + (pics[m.img] ? PIC(pics[m.img]) : '') + '</div>' +
+    (pics.length > 1 ? '<div class="thumbs">' + pics.map((src, i) => '<button class="thumb" data-act="thumb" data-id="' + i + '" aria-pressed="' + (i === m.img) + '" aria-label="Picture ' + (i + 1) + ' of ' + pics.length + '"><img src="' + esc(src) + '" alt="" onerror="this.parentNode.remove()"></button>').join('') + '</div>' : '') + '</div>' +
+    '<div class="dlg-info"><h2 id="dlg-title">' + esc(d.ProductName) + '</h2>' +
+      '<p class="muted">' + esc(catPath(d.CategoryID).join(' / ')) + ', sold by ' + esc(d.SellerName) + (s ? ' (seller rating ' + Number(s.Rating).toFixed(1) + ')' : '') + '</p>' +
+      '<p class="rating">' + ratingText(d.ReviewCount, rating, ' from ') + '</p>' +
+      '<p>' + esc(d.Description) + '</p>' +
+      (d.variants.length ? '<fieldset><legend>Choose a style</legend><div class="opts">' + opts + '</div></fieldset>' : '') +
+      '<p class="stock' + (left < 10 ? ' low' : '') + '">' + stockText + (v ? ' <span class="muted">(code ' + esc(v.SKU) + ')</span>' : '') + '</p>' +
+      '<div class="row"><div class="stepper" role="group" aria-label="Quantity"><button data-act="qty-dec" aria-label="Decrease quantity">−</button><span>' + m.qty + '</span><button data-act="qty-inc" aria-label="Increase quantity">+</button></div>' +
+      '<button class="btn primary" data-act="add"' + (left === 0 ? ' disabled' : '') + '>Add to cart, ' + money((v ? v.Price : 0) * m.qty) + '</button>' +
+      '<button class="btn" data-act="wish" data-id="' + p.id + '" aria-pressed="' + wished + '">' + (wished ? 'Remove from wishlist' : 'Save to wishlist') + '</button></div>' +
+    '</div></div>' +
+    (similar.length ? '<div class="similar"><h3>You may also like</h3><div class="grid small">' + similar.map(x => cardHTML(x)).join('') + '</div></div>' : '') +
+    '<div class="reviews"><h3>Reviews</h3>' + revList + '<div style="margin-top:14px">' + (cid() ? '<b>Write a review as ' + esc(state.customer.Name) + '</b>' : '') + form + '</div></div>' +
+  '</section></div>';
+}
+
+function cartDrawer() {
+  const lines = state.cart, t = totals(lines, state.coupon);
+  const body = lines.length ? lines.map(l =>
+    '<div class="line"><div><div class="name">' + esc(l.ProductName) + '</div><div class="muted">' + esc(vLabel(l)) + ', ' + money(l.Price) + ' each</div></div><div><b>' + money(l.LineTotal) + '</b></div>' +
+    '<div class="controls"><div class="stepper" role="group" aria-label="Quantity of ' + esc(l.ProductName) + '"><button data-act="line-dec" data-id="' + l.VariantID + '" aria-label="Decrease quantity">−</button><span>' + l.Quantity + '</span><button data-act="line-inc" data-id="' + l.VariantID + '" aria-label="Increase quantity">+</button></div>' +
+    '<button class="link" data-act="line-remove" data-id="' + l.VariantID + '">Remove</button></div></div>').join('') :
+    '<div class="empty" style="margin:32px auto"><h2>Your cart is empty</h2><p>Browse the shop and add something you like.</p><button class="btn primary" data-act="close">Keep shopping</button></div>';
+  const coupon = !lines.length ? '' : state.coupon ?
+    '<p class="ok">Code ' + esc(state.coupon.code) + ' applied (' + (state.coupon.type === 'Percentage' ? state.coupon.value + '% off' : money(state.coupon.value) + ' off') + ') <button class="link" data-act="coupon-remove">Remove code</button></p>' :
+    '<div class="coupon"><label class="sr" for="coupon-in">Coupon code</label><input id="coupon-in" placeholder="Coupon code" data-enter data-bind="couponInput" value="' + esc(state.couponInput) + '"><button class="btn" data-primary data-act="coupon-apply">Apply code</button></div>' + (state.couponMsg ? '<p class="err">' + esc(state.couponMsg) + '</p>' : '');
+  return '<div class="backdrop side" data-act="backdrop"><aside class="drawer" role="dialog" aria-modal="true" aria-labelledby="cart-title" tabindex="-1">' +
+    '<button class="x" data-act="close" aria-label="Close cart">×</button><h2 id="cart-title">Your cart</h2>' + body + coupon +
+    (lines.length ? '<div class="sum"><div><span>Subtotal</span><span>' + money(t.sub) + '</span></div>' + (t.disc ? '<div><span>Discount</span><span>−' + money(t.disc) + '</span></div>' : '') + '<div class="total"><span>Total</span><span>' + money(t.total) + '</span></div></div>' +
+      '<button class="btn primary" style="width:100%" data-act="checkout-open">Go to checkout</button>' : '') +
+  '</aside></div>';
+}
+
+function checkoutDialog() {
+  const c = state.checkout, t = totals(state.cart, state.coupon);
+  const picks = state.addresses.map(a => '<label class="pick"><input type="radio" name="addr" data-bind="checkout.addressId" value="' + a.AddressID + '"' + (String(c.addressId) === String(a.AddressID) ? ' checked' : '') + '><span>' + esc(a.Line1) + ', ' + esc(a.City) + (a.PostalCode ? ' ' + esc(a.PostalCode) : '') + '</span></label>').join('') +
+    '<label class="pick"><input type="radio" name="addr" data-bind="checkout.addressId" value="new"' + (c.addressId === 'new' ? ' checked' : '') + '><span>Use a new address</span></label>';
+  const newAddr = c.addressId === 'new' ?
+    '<div class="field"><label for="a1"><span>Street address</span></label><input id="a1" data-bind="checkout.line1" value="' + esc(c.line1) + '"></div>' +
+    '<div class="field"><label for="a2"><span>City</span></label><input id="a2" data-bind="checkout.city" value="' + esc(c.city) + '"></div>' +
+    '<div class="field"><label for="a3"><span>Postal code</span></label><input id="a3" data-bind="checkout.postal" value="' + esc(c.postal) + '"></div>' +
+    '<div class="field"><label for="a4"><span>Country</span></label><input id="a4" data-bind="checkout.country" value="' + esc(c.country) + '"></div>' : '';
+  const methods = METHODS.map(m => '<option' + (c.method === m ? ' selected' : '') + '>' + m + '</option>').join('');
+  return '<div class="backdrop" data-act="backdrop"><section class="dialog narrow" role="dialog" aria-modal="true" aria-labelledby="co-title" tabindex="-1">' +
+    '<button class="x" data-act="close" aria-label="Close">×</button><h2 id="co-title" style="margin-bottom:12px">Checkout</h2>' +
+    '<fieldset><legend>Where should we send it?</legend>' + picks + '</fieldset>' + newAddr +
+    '<div class="field"><label for="pay"><span>Payment method</span></label><select id="pay" data-bind="checkout.method">' + methods + '</select></div>' +
+    '<div class="sum">' + (t.disc ? '<div><span>Coupon ' + esc(state.coupon.code) + '</span><span>−' + money(t.disc) + '</span></div>' : '') + '<div class="total"><span>Total to pay</span><span>' + money(t.total) + '</span></div></div>' +
+    (c.error ? '<p class="err">' + esc(c.error) + '</p>' : '') +
+    '<button class="btn primary" style="width:100%" data-act="place"' + (c.placing ? ' disabled' : '') + '>' + (c.placing ? 'Placing order…' : 'Place order') + '</button></section></div>';
+}
+
+// The order as sp_PlaceOrder returned it (a vw_OrderSummary row).
+function confirmDialog() {
+  const o = state.confirm;
+  return '<div class="backdrop" data-act="backdrop"><section class="dialog narrow" role="dialog" aria-modal="true" aria-labelledby="ok-title" tabindex="-1">' +
+    '<h2 id="ok-title" style="margin-bottom:8px">Order ' + o.OrderID + ' placed</h2>' +
+    '<p>' + o.ItemCount + ' item' + (o.ItemCount === 1 ? '' : 's') + ', total ' + money(o.TotalAmount) + (Number(o.Discount) ? ' (you saved ' + money(o.Discount) + ' with ' + esc(o.CouponCode) + ')' : '') + '.</p>' +
+    '<p>Payment by ' + esc(o.PaymentMethod) + ' is <b>' + esc(o.PaymentStatus).toLowerCase() + '</b> until the shop confirms it. We will send your order to ' + esc(o.ShipToCity) + '.</p>' +
+    '<div class="row"><button class="btn primary" data-act="go-orders">View my orders</button><button class="btn" data-act="close">Keep shopping</button></div></section></div>';
+}
+
+// The menu lists the main categories. A main category with subcategories opens as a dropdown.
+const CHEVRON = '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>';
+function menuDrawer() {
+  const tops = catList.filter(c => !c.parentId).sort((a, b) => a.name.localeCompare(b.name));
+  const kidsOf = id => catList.filter(s => s.parentId === id).sort((a, b) => a.name.localeCompare(b.name));
+  const here = id => state.view === 'shop' && state.cat === id && !state.query.trim();
+  const leaf = (id, label, cls) => '<button class="' + cls + '" data-act="menu-cat" data-id="' + id + '"' + (here(id) ? ' aria-current="true"' : '') + '><span>' + esc(label) + '</span></button>';
+  const list = leaf(0, 'All products', '') + tops.map(c => {
+    const kids = kidsOf(c.id);
+    if (!kids.length) return leaf(c.id, c.name, '');
+    const open = !!state.menuOpen[c.id];
+    return '<button class="parent" data-act="menu-toggle" data-id="' + c.id + '" aria-expanded="' + open + '" aria-controls="sub-' + c.id + '"><span>' + esc(c.name) + '</span>' + CHEVRON + '</button>' +
+      '<div class="subs" id="sub-' + c.id + '"' + (open ? '' : ' hidden') + '>' + leaf(c.id, 'All ' + c.name, 'sub') + kids.map(k => leaf(k.id, k.name, 'sub')).join('') + '</div>';
+  }).join('');
+  return '<div class="backdrop side left" data-act="backdrop"><aside class="drawer left" role="dialog" aria-modal="true" aria-label="Menu" tabindex="-1">' +
+    '<button class="x" data-act="close" aria-label="Close menu">×</button><h2>Shop by category</h2><nav class="menu-list" aria-label="Categories">' + list + '</nav></aside></div>';
+}
+
+function loginDialog() {
+  const f = state.form;
+  return '<div class="backdrop" data-act="backdrop"><section class="dialog narrow" role="dialog" aria-modal="true" aria-labelledby="li-title" tabindex="-1">' +
+    '<button class="x" data-act="close" aria-label="Close">×</button><h2 id="li-title" style="margin-bottom:6px">Log in</h2>' +
+    (f.notice ? '<p class="muted">' + esc(f.notice) + '</p>' : '') +
+    '<div class="field"><label for="li-email"><span>Email</span></label><input id="li-email" type="email" autocomplete="email" data-enter data-bind="form.email" value="' + esc(f.email) + '"></div>' +
+    '<div class="field"><label for="li-pass"><span>Password</span></label><input id="li-pass" type="password" autocomplete="current-password" data-enter data-bind="form.password" value="' + esc(f.password) + '"></div>' +
+    (f.error ? '<p class="err">' + esc(f.error) + '</p>' : '') +
+    '<button class="btn primary" style="width:100%;margin-top:6px" data-primary data-act="login"' + (f.busy ? ' disabled' : '') + '>Log in</button>' +
+    '<p class="muted" style="margin-top:14px">New to ShopSphere? <button class="link" data-act="signup-open">Create an account</button></p>' +
+    '<p class="muted">Sample accounts from the database: for example <b>ali.raza@example.com</b> with password <b>hashed_pw_001</b> (customer 2 uses hashed_pw_002, and so on).</p></section></div>';
+}
+function signupDialog() {
+  const f = state.form;
+  const fld = (id, label, type, bind, auto) => '<div class="field"><label for="' + id + '"><span>' + label + '</span></label><input id="' + id + '" type="' + type + '" autocomplete="' + auto + '" data-enter data-bind="form.' + bind + '" value="' + esc(f[bind]) + '"></div>';
+  return '<div class="backdrop" data-act="backdrop"><section class="dialog narrow" role="dialog" aria-modal="true" aria-labelledby="su-title" tabindex="-1">' +
+    '<button class="x" data-act="close" aria-label="Close">×</button><h2 id="su-title" style="margin-bottom:6px">Create your account</h2>' +
+    fld('su-name', 'Full name', 'text', 'name', 'name') + fld('su-email', 'Email', 'email', 'email', 'email') + fld('su-phone', 'Phone (optional)', 'tel', 'phone', 'tel') +
+    fld('su-pass', 'Password (at least 8 characters)', 'password', 'password', 'new-password') + fld('su-confirm', 'Confirm password', 'password', 'confirm', 'new-password') +
+    (f.error ? '<p class="err">' + esc(f.error) + '</p>' : '') +
+    '<button class="btn primary" style="width:100%;margin-top:6px" data-primary data-act="signup"' + (f.busy ? ' disabled' : '') + '>Create account</button>' +
+    '<p class="muted" style="margin-top:14px">Already have an account? <button class="link" data-act="login-open">Log in</button></p></section></div>';
+}
+
+// ---------- drawing the page ----------
+let lastOverlayKey = '';
+function render() {
+  const active = document.activeElement;
+  const keep = active && active.dataset && active.dataset.act ? '[data-act="' + active.dataset.act + '"]' + (active.dataset.id ? '[data-id="' + active.dataset.id + '"]' : '') : null;
+  // top right: profile badge (name shows on hover) and cart count
+  const name = cid() ? state.customer.Name : '';
+  $('#account').innerHTML = cid() ?
+    '<button class="badge in" data-act="profile-open" aria-label="Profile: ' + esc(name) + '">' + esc(name[0].toUpperCase()) + '<span class="tip" aria-hidden="true">' + esc(name) + '</span></button>' :
+    '<button class="badge" data-act="login-open" aria-label="Log in">' + ico('<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/>', 22) + '<span class="tip" aria-hidden="true">Log in</span></button>';
+  const cartN = state.cart.reduce((s, l) => s + l.Quantity, 0), wishN = state.wish.length;
+  $('#n-cart').hidden = cartN === 0; $('#n-cart').textContent = cartN;
+  $('#n-wish').hidden = wishN === 0; $('#n-wish').textContent = wishN;
+  document.querySelectorAll('.dock [data-view]').forEach(b => b.setAttribute('aria-current', (b.dataset.view === state.view || (b.dataset.view === 'home' && state.view === 'shop')) ? 'page' : 'false'));
+  $('.dock [data-act="profile-open"]').setAttribute('aria-current', state.view === 'profile' ? 'page' : 'false');
+  const views = { home: homeView, shop: shopView, wishlist: wishView, orders: ordersView, profile: profileView };
+  $('#main').innerHTML = state.loadError ?
+      '<div class="empty"><h2>The shop could not load</h2><p>' + esc(state.loadError) + '</p><button class="btn primary" data-act="retry">Try again</button></div>' :
+    !state.ready ? loading('Loading the shop…') : (views[state.view] || homeView)();
+  // overlays (keep the scroll position while the same dialog is redrawn)
+  const key = state.overlay ? state.overlay + (state.modal ? state.modal.pid : '') : '';
+  const ov = $('#overlay'), oldBox = ov.querySelector('[tabindex="-1"]');
+  const keepTop = oldBox && key && key === lastOverlayKey ? oldBox.scrollTop : 0;
+  const overlays = { product: productDialog, cart: cartDrawer, checkout: checkoutDialog, confirm: confirmDialog, menu: menuDrawer, login: loginDialog, signup: signupDialog };
+  ov.innerHTML = overlays[state.overlay] ? overlays[state.overlay]() : '';
+  document.body.classList.toggle('locked', !!state.overlay);
+  const box = ov.querySelector('[tabindex="-1"]');
+  if (box && keepTop) box.scrollTop = keepTop;
+  if (key && key !== lastOverlayKey) { const first = (state.overlay === 'login' || state.overlay === 'signup') && box ? box.querySelector('input') : null; if (first || box) (first || box).focus(); }
+  else if (keep && state.overlay) { const el = ov.querySelector(keep); if (el) el.focus(); }
+  else if (keep) { const el = document.querySelector(keep); if (el) el.focus(); }
+  lastOverlayKey = key;
+}
+let toastTimer;
+function toast(msg) {
+  const t = $('#toast'); t.textContent = msg; t.classList.add('show');
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 2800);
+}
+function closeOverlay() { state.overlay = null; state.modal = null; state.checkout = null; state.couponMsg = ''; }
+function showView(v) {
+  state.view = v; closeOverlay(); render(); window.scrollTo(0, 0);
+  // Order statuses change when the shop ships or delivers, so ask again each time.
+  if (v === 'orders' && cid()) loadOrders().then(render, e => toast(e.message));
+}
+
+// Runs one action at a time, so a double click cannot place two orders.
+let busy = false;
+async function once(fn) {
+  if (busy) return;
+  busy = true;
+  try { await fn(); } catch (e) { toast(e.message); render(); } finally { busy = false; }
+}
+
+// ---------- logging in and out ----------
+const newForm = () => ({ name: '', email: '', phone: '', password: '', confirm: '', error: '', notice: '', busy: false });
+function needLogin(msg) { state.form = newForm(); state.form.notice = msg; state.modal = null; state.overlay = 'login'; render(); }
+
+async function signIn(customer, greeting) {
+  state.customer = customer;
+  try { localStorage.setItem(SAVED_LOGIN, String(customer.CustomerID)); } catch (e) { /* private window */ }
+  state.coupon = null; state.couponInput = ''; state.ordersLoaded = false;
+  closeOverlay(); render();
+  await loadAccount();
+  render();
+  if (greeting) toast(greeting + customer.Name.split(' ')[0]);
+}
+async function doLogin() {
+  const f = state.form, email = (f.email || '').trim();
+  if (!email || !f.password) { f.error = 'Enter your email and password.'; render(); return; }
+  f.busy = true; f.error = ''; render();
+  try {
+    const customer = await api.post('/customers/login', { email: email, password: f.password });
+    await signIn(customer, 'Welcome back, ');
+  } catch (e) {
+    f.busy = false; f.error = e.status === 401 ? 'The email or password is not right.' : e.message; render();
+  }
+}
+async function doSignup() {
+  const f = state.form, name = f.name.trim(), email = f.email.trim().toLowerCase();
+  if (!name || !email || !f.password) f.error = 'Fill in your name, email and password.';
+  else if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) f.error = 'Enter a valid email address.';
+  else if (f.password.length < 8) f.error = 'Use at least 8 characters for the password.';
+  else if (f.password !== f.confirm) f.error = 'The two passwords do not match.';
+  else {
+    f.busy = true; f.error = ''; render();
+    try {
+      const customer = await api.post('/customers/register', { name: name, email: email, password: f.password, phone: f.phone.trim() || null });
+      await signIn(customer, 'Account created. Welcome, ');
+      return;
+    } catch (e) {
+      f.busy = false;
+      f.error = e.status === 409 ? 'An account with this email already exists. Try logging in.' : e.message;
+    }
+  }
+  render();
+}
+function logout() {
+  try { localStorage.removeItem(SAVED_LOGIN); } catch (e) { /* ignore */ }
+  state.customer = null; state.cart = []; state.wish = []; state.addresses = []; state.orders = []; state.ordersLoaded = false;
+  state.coupon = null; state.couponInput = '';
+  showView('home'); toast('Logged out');
+}
+
+// ---------- products, wishlist, cart ----------
+async function openProduct(pid) {
+  state.modal = { pid: pid, detail: null, vid: null, img: 0, qty: 1, rating: '', text: '', reviewError: '', error: '' };
+  state.overlay = 'product'; render();
+  await loadProductDetail();
+}
+async function loadProductDetail() {
+  const m = state.modal;
+  try {
+    const d = await api.get('/products/' + m.pid);
+    if (state.modal !== m) return;                        // the dialog was closed or changed
+    m.detail = d;
+    if (!d.variants.some(v => v.VariantID === m.vid)) {
+      const first = d.variants.find(v => v.StockQty > 0) || d.variants[0];
+      m.vid = first ? first.VariantID : null;
+    }
+  } catch (e) { if (state.modal === m) m.error = e.message; }
+  render();
+}
+async function toggleWish(pid) {
+  if (!cid()) { needLogin('Log in to save products to your wishlist.'); return; }
+  const path = '/customers/' + cid() + '/wishlist';
+  if (state.wish.includes(pid)) { await api.del(path + '/' + pid); state.wish = state.wish.filter(x => x !== pid); toast('Removed from wishlist'); }
+  else { await api.post(path, { productId: pid }); state.wish.push(pid); toast('Saved to wishlist'); }
+  render();
+}
+// sp_AddToCart creates the cart if needed, merges with an existing line and checks the stock.
+async function addToCart() {
+  if (!cid()) { needLogin('Log in to add items to your cart.'); return; }
+  const m = state.modal;
+  if (!m.vid) return;
+  try {
+    const cart = await api.post('/customers/' + cid() + '/cart', { variantId: m.vid, quantity: m.qty });
+    state.cart = cart.items; toast('Added to cart');
+  } catch (e) { toast(e.message); }
+  render();
+}
+async function changeLine(vid, delta) {
+  const line = state.cart.find(l => l.VariantID === vid);
+  if (!line || line.Quantity + delta < 1) return;
+  const cart = await api.put('/customers/' + cid() + '/cart/' + vid, { quantity: line.Quantity + delta });
+  state.cart = cart.items; render();
+}
+async function removeLine(vid) {
+  const cart = await api.del('/customers/' + cid() + '/cart/' + vid);
+  state.cart = cart.items; render();
+}
+async function applyCoupon() {
+  const code = state.couponInput.trim();
+  if (!code) state.couponMsg = 'Type a coupon code first.';
+  else {
+    try {
+      const c = await api.get('/coupons/' + encodeURIComponent(code));
+      if (!c.IsValid) state.couponMsg = 'Code ' + c.Code + ' expired on ' + fmtDate(c.ExpiryDate) + '.';
+      else { state.coupon = { code: c.Code, type: c.DiscountType, value: Number(c.DiscountValue) }; state.couponMsg = ''; state.couponInput = ''; toast('Code applied'); }
+    } catch (e) { state.couponMsg = e.status === 404 ? 'That code does not exist.' : e.message; }
+  }
+  render();
+}
+
+// ---------- checkout and orders ----------
+function openCheckout() {
+  state.checkout = { addressId: state.addresses.length ? state.addresses[0].AddressID : 'new', method: METHODS[0], line1: '', city: '', postal: '', country: 'Pakistan', error: '', placing: false };
+  state.overlay = 'checkout'; render();
+}
+// sp_PlaceOrder does the real work in one transaction: order, items, stock, payment, shipment, empty cart.
+async function placeOrder() {
+  const c = state.checkout, id = cid();
+  if (!state.cart.length) { c.error = 'Your cart is empty.'; render(); return; }
+  if (c.addressId === 'new' && (!c.line1.trim() || !c.city.trim() || !c.country.trim())) { c.error = 'Fill in street address, city and country.'; render(); return; }
+  c.placing = true; c.error = ''; render();
+  try {
+    if (c.addressId === 'new') {
+      const a = await api.post('/customers/' + id + '/addresses', { line1: c.line1.trim(), city: c.city.trim(), postalCode: c.postal.trim() || null, country: c.country.trim(), addressType: 'Shipping' });
+      state.addresses.push(a); c.addressId = a.AddressID;
+    }
+    const order = await api.post('/customers/' + id + '/orders', {
+      addressId: Number(c.addressId), paymentMethod: c.method, couponCode: state.coupon ? state.coupon.code : null });
+    state.cart = []; state.coupon = null; state.checkout = null;
+    state.confirm = order; state.overlay = 'confirm'; render();
+    loadOrders().then(render, () => {});
+    refreshCatalog();                                     // stock went down
+  } catch (e) {
+    c.placing = false; c.error = e.message; render();
+    // The cart may have changed (for example stock ran out), so show the latest one.
+    api.get('/customers/' + id + '/cart').then(cart => { state.cart = cart.items; render(); }, () => {});
+  }
+}
+async function cancelOrder(orderId) {
+  if (!confirm('Cancel order ' + orderId + '? Its items go back in stock and any payment is refunded.')) return;
+  await api.post('/orders/' + orderId + '/cancel');
+  toast('Order ' + orderId + ' cancelled');
+  await loadOrders(); render();
+  refreshCatalog();                                       // stock went back up
+}
+async function postReview() {
+  if (!cid()) { needLogin('Log in to write a review.'); return; }
+  const m = state.modal, rating = Number(m.rating), text = (m.text || '').trim();
+  if (!rating || !text) { m.reviewError = 'Choose a rating and write a short comment.'; render(); return; }
+  try {
+    await api.post('/products/' + m.pid + '/reviews', { customerId: cid(), rating: rating, comment: text });
+    m.rating = ''; m.text = ''; m.reviewError = ''; toast('Review posted');
+    await loadProductDetail();
+    refreshCatalog();                                     // rating changed
+  } catch (e) {
+    m.reviewError = e.status === 409 ? 'You have already reviewed this product.' : e.message; render();
+  }
+}
+function clearSearch() { state.query = ''; $('#q').value = ''; }
+
+// ---------- events ----------
+document.addEventListener('click', e => {
+  const el = e.target.closest('[data-act]');
+  if (!el) return;
+  const act = el.dataset.act, id = Number(el.dataset.id);
+  switch (act) {
+    case 'nav':
+      if (el.dataset.view === 'shop') { state.cat = 0; clearSearch(); search(0); }
+      showView(el.dataset.view); break;
+    case 'retry': start(); break;
+    case 'menu-open': state.modal = null; state.menuOpen = {}; if (state.cat) state.menuOpen[topOf(state.cat).id] = true; state.overlay = 'menu'; render(); break;
+    case 'menu-toggle': state.menuOpen[id] = !state.menuOpen[id]; render(); break;
+    case 'menu-cat': state.cat = id; clearSearch(); search(0); showView('shop'); break;
+    case 'clear-cat': state.cat = 0; search(0); render(); break;
+    case 'clear-q': clearSearch(); search(0); render(); break;
+    case 'clear': state.cat = 0; clearSearch(); search(0); render(); break;
+    case 'profile-open': if (!cid()) needLogin('Log in to see your profile.'); else showView('profile'); break;
+    case 'open': openProduct(id); break;
+    case 'wish': once(() => toggleWish(id)); break;
+    case 'backdrop': if (e.target === el) { closeOverlay(); render(); } break;
+    case 'close': closeOverlay(); render(); break;
+    case 'thumb': state.modal.img = id; render(); break;
+    case 'variant': state.modal.vid = id; state.modal.qty = 1; render(); break;
+    case 'qty-dec': state.modal.qty = Math.max(1, state.modal.qty - 1); render(); break;
+    case 'qty-inc': {
+      const v = state.modal.detail && state.modal.detail.variants.find(x => x.VariantID === state.modal.vid);
+      state.modal.qty = Math.min(Math.max(1, v ? v.StockQty : 1), state.modal.qty + 1); render(); break;
+    }
+    case 'add': once(addToCart); break;
+    case 'review': once(postReview); break;
+    case 'cart-open': if (!cid()) { needLogin('Log in to see your cart.'); break; } state.overlay = 'cart'; state.modal = null; render(); break;
+    case 'login-open': state.form = newForm(); state.modal = null; state.overlay = 'login'; render(); break;
+    case 'signup-open': state.form = newForm(); state.modal = null; state.overlay = 'signup'; render(); break;
+    case 'login': once(doLogin); break;
+    case 'signup': once(doSignup); break;
+    case 'logout': logout(); break;
+    case 'line-inc': once(() => changeLine(id, 1)); break;
+    case 'line-dec': once(() => changeLine(id, -1)); break;
+    case 'line-remove': once(() => removeLine(id)); break;
+    case 'coupon-apply': once(applyCoupon); break;
+    case 'coupon-remove': state.coupon = null; render(); break;
+    case 'checkout-open': openCheckout(); break;
+    case 'place': once(placeOrder); break;
+    case 'cancel-order': once(() => cancelOrder(id)); break;
+    case 'go-orders': showView('orders'); break;
+  }
+});
+function setPath(path, val) {
+  const keys = path.split('.'); let o = state;
+  for (let i = 0; i < keys.length - 1; i++) o = o[keys[i]];
+  o[keys[keys.length - 1]] = val;
+}
+document.addEventListener('input', e => {
+  const t = e.target;
+  if (t.id === 'q') {
+    state.query = t.value; closeOverlay();
+    if (state.view !== 'shop') state.view = 'shop';
+    search(250);                                          // wait until typing pauses
+    render(); return;
+  }
+  if (t.dataset.bind && t.tagName !== 'SELECT' && t.type !== 'radio') setPath(t.dataset.bind, t.value);
+});
+document.addEventListener('change', e => {
+  const t = e.target;
+  if (t.dataset.bind) { setPath(t.dataset.bind, t.value); if (t.type === 'radio' || t.tagName === 'SELECT') render(); }
+});
+document.addEventListener('keydown', e => {
+  if (!state.overlay) return;
+  if (e.key === 'Enter' && e.target.dataset && e.target.dataset.enter !== undefined) { e.preventDefault(); const b = $('#overlay [data-primary]'); if (b) b.click(); return; }
+  if (e.key === 'Escape') { closeOverlay(); render(); return; }
+  if (e.key === 'Tab') {
+    const box = $('#overlay [tabindex="-1"]'); if (!box) return;
+    const f = box.querySelectorAll('button:not([disabled]),input,select,textarea,[href]');
+    if (!f.length) return;
+    const first = f[0], last = f[f.length - 1];
+    if (e.shiftKey && (document.activeElement === first || document.activeElement === box)) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  }
+});
+
+// ---------- start ----------
+async function start() {
+  state.loadError = ''; state.ready = false; render();
+  try {
+    await loadCatalog();
+    state.ready = true; render();
+  } catch (e) { state.loadError = e.message; render(); return; }
+  // Log back in the customer this browser remembers.
+  let saved = null;
+  try { saved = localStorage.getItem(SAVED_LOGIN); } catch (e) { /* private window */ }
+  if (saved && !cid()) {
+    try { await signIn(await api.get('/customers/' + Number(saved)), ''); }
+    catch (e) { try { localStorage.removeItem(SAVED_LOGIN); } catch (e2) { /* ignore */ } }
+  }
+}
+start();
+})();
+</script>
+</body>
+</html>
