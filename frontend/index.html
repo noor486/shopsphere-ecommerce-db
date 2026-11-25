@@ -57,11 +57,13 @@
       POST /api/customers/:id/cart             add to cart, using the stored procedure sp_AddToCart
       PUT/DELETE /api/customers/:id/cart/:variantId   change a line's quantity / remove it
       GET /api/coupons/:code                   check a coupon code before checkout
+      POST /api/customers/:id/addresses        save a new address typed at checkout
+      POST /api/customers/:id/orders           checkout, using the stored procedure sp_PlaceOrder
   - The page keeps a copy of what it loaded and draws itself from it (render).
   - The logged-in customer's ID is remembered in this browser (localStorage), so a
     refresh keeps you logged in. Logging out forgets it.
   - Connected so far: browsing and search (5.1), product details (5.2), accounts (5.3),
-    wishlist (5.4), cart and coupons (5.5). Checkout and orders come in the next steps.
+    wishlist (5.4), cart and coupons (5.5), checkout (5.6). Order history comes next.
 */
 (function () {
 'use strict';
@@ -72,6 +74,7 @@ const ico = (paths, size) => '<svg viewBox="0 0 24 24" width="' + (size || 24) +
 const COLORS = { 'Electronics': '#2F4B9B', 'Fashion': '#B23A5A', 'Home & Kitchen': '#52702F', 'Books': '#6B3FA0', 'Sports & Outdoors': '#B8501A', 'Beauty & Personal Care': '#0E7C7B', 'Bath & Body': '#8A6A1F' };
 const SORTS = [['featured', 'Featured'], ['price-asc', 'Price, low to high'], ['price-desc', 'Price, high to low'], ['rating', 'Top rated']];
 const SAVED_LOGIN = 'shopsphere-customer';   // localStorage key holding the logged-in CustomerID
+const METHODS = ['Credit Card', 'JazzCash', 'Easypaisa', 'Cash on Delivery', 'Bank Transfer'];
 
 // ---------- what the page has loaded from the API ----------
 let cats = {}, catList = [];      // Category rows, by id
@@ -90,6 +93,8 @@ const state = {
   wish: [],                        // ProductIDs in the customer's wishlist
   cart: [],                        // cart lines: { VariantID, ProductName, Size, Color, Quantity, Price, LineTotal, StockQty }
   coupon: null, couponInput: '', couponMsg: '',   // the coupon applied in the cart: { code, type, value }
+  checkout: null,                  // the checkout form: { addressId, method, line1, city, postal, country, error }
+  confirm: null,                   // the order sp_PlaceOrder returned (a vw_OrderSummary row)
   form: {}                         // what is typed in the log-in / sign-up dialog
 };
 const cid = () => state.customer && state.customer.CustomerID;
@@ -312,8 +317,39 @@ function cartDrawer() {
   return '<div class="backdrop side" data-act="backdrop"><aside class="drawer" role="dialog" aria-modal="true" aria-labelledby="cart-title" tabindex="-1">' +
     '<button class="x" data-act="close" aria-label="Close cart">×</button><h2 id="cart-title">Your cart</h2>' + body + coupon +
     (lines.length ? '<div class="sum"><div><span>Subtotal</span><span>' + money(t.sub) + '</span></div>' + (t.disc ? '<div><span>Discount</span><span>−' + money(t.disc) + '</span></div>' : '') + '<div class="total"><span>Total</span><span>' + money(t.total) + '</span></div></div>' +
-      '<button class="btn primary" style="width:100%" data-act="later" data-what="Checkout">Go to checkout</button>' : '') +
+      '<button class="btn primary" style="width:100%" data-act="checkout-open">Go to checkout</button>' : '') +
   '</aside></div>';
+}
+
+// ---------- checkout ----------
+function checkoutDialog() {
+  const c = state.checkout, t = totals(state.cart, state.coupon);
+  const picks = state.addresses.map(a => '<label class="pick"><input type="radio" name="addr" data-bind="checkout.addressId" value="' + a.AddressID + '"' + (String(c.addressId) === String(a.AddressID) ? ' checked' : '') + '><span>' + esc(a.Line1) + ', ' + esc(a.City) + (a.PostalCode ? ' ' + esc(a.PostalCode) : '') + '</span></label>').join('') +
+    '<label class="pick"><input type="radio" name="addr" data-bind="checkout.addressId" value="new"' + (c.addressId === 'new' ? ' checked' : '') + '><span>Use a new address</span></label>';
+  const newAddr = c.addressId === 'new' ?
+    '<div class="field"><label for="a1"><span>Street address</span></label><input id="a1" data-bind="checkout.line1" value="' + esc(c.line1) + '"></div>' +
+    '<div class="field"><label for="a2"><span>City</span></label><input id="a2" data-bind="checkout.city" value="' + esc(c.city) + '"></div>' +
+    '<div class="field"><label for="a3"><span>Postal code (optional)</span></label><input id="a3" data-bind="checkout.postal" value="' + esc(c.postal) + '"></div>' +
+    '<div class="field"><label for="a4"><span>Country</span></label><input id="a4" data-bind="checkout.country" value="' + esc(c.country) + '"></div>' : '';
+  const methods = METHODS.map(m => '<option' + (c.method === m ? ' selected' : '') + '>' + m + '</option>').join('');
+  return '<div class="backdrop" data-act="backdrop"><section class="dialog narrow" role="dialog" aria-modal="true" aria-labelledby="co-title" tabindex="-1">' +
+    '<button class="x" data-act="close" aria-label="Close">×</button><h2 id="co-title" style="margin-bottom:12px">Checkout</h2>' +
+    '<fieldset><legend>Where should we send it?</legend>' + picks + '</fieldset>' + newAddr +
+    '<div class="field"><label for="pay"><span>Payment method</span></label><select id="pay" data-bind="checkout.method">' + methods + '</select></div>' +
+    '<div class="sum"><div><span>' + state.cart.length + ' line' + (state.cart.length === 1 ? '' : 's') + ', subtotal</span><span>' + money(t.sub) + '</span></div>' +
+      (t.disc ? '<div><span>Coupon ' + esc(state.coupon.code) + '</span><span>−' + money(t.disc) + '</span></div>' : '') +
+      '<div class="total"><span>Total to pay</span><span>' + money(t.total) + '</span></div></div>' +
+    (c.error ? '<p class="err">' + esc(c.error) + '</p>' : '') +
+    '<button class="btn primary" style="width:100%" data-act="place"' + (c.placing ? ' disabled' : '') + '>' + (c.placing ? 'Placing order…' : 'Place order') + '</button></section></div>';
+}
+// The new order, as sp_PlaceOrder returned it (its row from vw_OrderSummary).
+function confirmDialog() {
+  const o = state.confirm;
+  return '<div class="backdrop" data-act="backdrop"><section class="dialog narrow" role="dialog" aria-modal="true" aria-labelledby="ok-title" tabindex="-1">' +
+    '<h2 id="ok-title" style="margin-bottom:8px">Order ' + o.OrderID + ' placed</h2>' +
+    '<p>' + o.ItemCount + ' item' + (o.ItemCount === 1 ? '' : 's') + ', total ' + money(o.TotalAmount) + (Number(o.Discount) ? ' (you saved ' + money(o.Discount) + ' with ' + esc(o.CouponCode) + ')' : '') + '.</p>' +
+    '<p>Payment by ' + esc(o.PaymentMethod) + ' is <b>' + esc(o.PaymentStatus).toLowerCase() + '</b> until the shop confirms it. We will send your order to ' + esc(o.ShipToCity) + '.</p>' +
+    '<div class="row"><button class="btn primary" data-act="later" data-what="My orders">View my orders</button><button class="btn" data-act="close">Keep shopping</button></div></section></div>';
 }
 
 // ---------- account: profile page, log-in and sign-up dialogs ----------
@@ -390,7 +426,7 @@ function render() {
   const key = state.overlay ? state.overlay + (state.modal ? state.modal.pid : '') : '';
   const ov = $('#overlay'), oldBox = ov.querySelector('[tabindex="-1"]');
   const keepTop = oldBox && key && key === lastOverlayKey ? oldBox.scrollTop : 0;
-  const overlays = { menu: menuDrawer, product: productDialog, login: loginDialog, signup: signupDialog, cart: cartDrawer };
+  const overlays = { menu: menuDrawer, product: productDialog, login: loginDialog, signup: signupDialog, cart: cartDrawer, checkout: checkoutDialog, confirm: confirmDialog };
   ov.innerHTML = overlays[state.overlay] ? overlays[state.overlay]() : '';
   document.body.classList.toggle('locked', !!state.overlay);
   const box = ov.querySelector('[tabindex="-1"]');
@@ -408,7 +444,7 @@ function toast(msg) {
   const t = $('#toast'); t.textContent = msg; t.classList.add('show');
   clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 2800);
 }
-function closeOverlay() { state.overlay = null; state.modal = null; state.couponMsg = ''; }
+function closeOverlay() { state.overlay = null; state.modal = null; state.checkout = null; state.couponMsg = ''; }
 function showView(v) { state.view = v; closeOverlay(); render(); window.scrollTo(0, 0); }
 function clearSearch() { state.query = ''; $('#q').value = ''; }
 
@@ -523,6 +559,40 @@ async function applyCoupon() {
   render();
 }
 
+// ---------- checkout ----------
+function openCheckout() {
+  state.checkout = { addressId: state.addresses.length ? state.addresses[0].AddressID : 'new', method: METHODS[0], line1: '', city: '', postal: '', country: 'Pakistan', error: '', placing: false };
+  state.overlay = 'checkout'; render();
+}
+// POST /orders runs sp_PlaceOrder. In one transaction it creates the order, copies the cart
+// lines into OrderItem, takes the items out of stock, records a Pending payment, creates the
+// shipment and empties the cart. If anything fails, all of it is rolled back and the API
+// answers 400 with the reason (empty cart, not enough stock, expired coupon ...).
+async function placeOrder() {
+  const c = state.checkout, id = cid();
+  if (c.addressId === 'new' && (!c.line1.trim() || !c.city.trim() || !c.country.trim())) { c.error = 'Fill in street address, city and country.'; render(); return; }
+  c.placing = true; c.error = ''; render();
+  try {
+    if (c.addressId === 'new') {             // save the typed address first (one INSERT into Address)
+      const a = await api.post('/customers/' + id + '/addresses', { line1: c.line1.trim(), city: c.city.trim(), postalCode: c.postal.trim() || null, country: c.country.trim(), addressType: 'Shipping' });
+      state.addresses.push(a); c.addressId = a.AddressID;
+    }
+    const order = await api.post('/customers/' + id + '/orders', {
+      addressId: Number(c.addressId), paymentMethod: c.method, couponCode: state.coupon ? state.coupon.code : null });
+    state.cart = []; state.coupon = null; state.checkout = null;
+    state.confirm = order; state.overlay = 'confirm'; render();
+    refreshCatalog();                        // stock went down and "Most ordered" changed
+  } catch (e) {
+    c.placing = false; c.error = e.message; render();
+    // The cart may have changed meanwhile (e.g. stock ran out), so show the latest one.
+    api.get(cartPath()).then(cart => { state.cart = cart.items; render(); }, () => {});
+  }
+}
+// Load the products again (stock, ratings and sales change after an order).
+async function refreshCatalog() {
+  try { await loadCatalog(); if (state.results) search(0); render(); } catch (e) { toast(e.message); }
+}
+
 // ---------- wishlist ----------
 // Heart on a card, or the button in the product details. Saved in the WishlistItem table:
 // POST adds a row, DELETE removes it. (UNIQUE (CustomerID, ProductID) stops duplicates.)
@@ -576,6 +646,9 @@ document.addEventListener('click', e => {
     case 'line-remove': once(() => removeLine(id)); break;
     case 'coupon-apply': once(applyCoupon); break;
     case 'coupon-remove': state.coupon = null; render(); break;
+    // checkout
+    case 'checkout-open': openCheckout(); break;
+    case 'place': once(placeOrder); break;
     // account
     case 'login-open': openLogin(); break;
     case 'signup-open': state.form = newForm(); state.modal = null; state.overlay = 'signup'; render(); break;
@@ -601,11 +674,12 @@ document.addEventListener('input', e => {
     search(250);                                          // wait until typing pauses
     render(); return;
   }
-  if (t.dataset.bind && t.tagName !== 'SELECT') setPath(t.dataset.bind, t.value);
+  if (t.dataset.bind && t.tagName !== 'SELECT' && t.type !== 'radio') setPath(t.dataset.bind, t.value);
 });
+// Drop-down lists and radio buttons redraw the page (e.g. "Use a new address" shows its boxes).
 document.addEventListener('change', e => {
   const t = e.target;
-  if (t.dataset.bind && t.tagName === 'SELECT') { setPath(t.dataset.bind, t.value); render(); }
+  if (t.dataset.bind && (t.tagName === 'SELECT' || t.type === 'radio')) { setPath(t.dataset.bind, t.value); render(); }
 });
 document.addEventListener('keydown', e => {
   if (!state.overlay) return;
