@@ -45,11 +45,12 @@
       GET /api/categories                      the category menu
       GET /api/products                        every product, from the view vw_ProductCatalog
       GET /api/products?search=&categoryId=    the search box and the category menu
+      GET /api/products/:id                    one product with its variants, images and reviews
       GET /api/sellers                         seller names and ratings
       GET /api/admin/reports/top-products      units sold, for "Most ordered"
   - The page keeps a copy of what it loaded and draws itself from it (render).
-  - Step 5.1: browsing and search only. Product pages, accounts, cart, wishlist,
-    checkout and orders are connected in the next steps.
+  - Connected so far: browsing and search (step 5.1), product details (step 5.2).
+    Accounts, cart, wishlist, checkout and orders are connected in the next steps.
 */
 (function () {
 'use strict';
@@ -70,7 +71,8 @@ const state = {
   ready: false, loadError: '',
   view: 'home', query: '', cat: 0, sort: 'featured',
   results: null, searching: false, // product ids matching the search box / category, from the API
-  menuOpen: {}, overlay: null
+  menuOpen: {}, overlay: null,
+  modal: null                      // the open product: { pid, detail, vid, img, qty }
 };
 
 // A vw_ProductCatalog row, in the shape the page uses.
@@ -90,6 +92,13 @@ const catPath = id => { const out = []; let c = cats[id]; while (c) { out.unshif
 // ---------- products ----------
 const colorOf = p => COLORS[(topOf(p.categoryId) || {}).name] || '#12343B';
 const initials = n => n.split(/\s+/).filter(w => /^[A-Za-z]/.test(w)).slice(0, 2).map(w => w[0].toUpperCase()).join('');
+// A ProductVariant's size and colour, e.g. "M, Blue" (or "Standard" when it has neither).
+const vLabel = v => {
+  const parts = [];
+  if (v.Size && v.Size !== 'Standard' && v.Size !== 'N/A') parts.push(v.Size);
+  if (v.Color && v.Color !== 'N/A') parts.push(v.Color);
+  return parts.join(', ') || 'Standard';
+};
 // Pictures live in frontend/images/. ProductImage.URL holds the file name at the end
 // (https://images.shopsphere.example/p1-main.jpg -> images/p1-main.jpg). Without the file,
 // the card shows the coloured tile with the product's initials.
@@ -97,6 +106,14 @@ const imgSrc = url => 'images/' + String(url).split('/').pop();
 const PIC = src => '<img class="pic" src="' + esc(src) + '" alt="" loading="lazy" onerror="this.remove()">';
 const stars = a => '★'.repeat(Math.round(a)) + '☆'.repeat(5 - Math.round(a));
 const ratingText = (n, avg, joiner) => n ? '<span aria-hidden="true">' + stars(avg) + '</span> ' + avg.toFixed(1) + joiner + n + ' review' + (n > 1 ? 's' : '') : 'No reviews yet';
+
+// Similar products: same category first, then the rest of the same main category, best rated first.
+function similarTo(p) {
+  const top = topOf(p.categoryId).id;
+  return prodList.filter(x => x.id !== p.id && topOf(x.categoryId).id === top)
+    .map(x => ({ x: x, score: (x.categoryId === p.categoryId ? 2 : 0) + x.rating / 10 }))
+    .sort((a, b) => b.score - a.score || a.x.name.localeCompare(b.x.name)).slice(0, 4).map(o => o.x);
+}
 
 // ---------- loading from the API ----------
 async function loadCatalog() {
@@ -198,6 +215,51 @@ function shopView() {
       '<div class="empty"><h2>No products found</h2><p>Try a shorter word or pick another category.</p><button class="btn" data-act="clear">Clear search and filters</button></div>');
 }
 
+// ---------- product details ----------
+// Opens over the page. The product's row from vw_ProductCatalog (already loaded) shows the
+// name and colour at once; GET /api/products/:id then brings the variants, images and reviews.
+async function openProduct(pid) {
+  state.modal = { pid: pid, detail: null, vid: null, img: 0, qty: 1, error: '' };
+  state.overlay = 'product'; render();
+  const m = state.modal;
+  try {
+    const d = await api.get('/products/' + pid);
+    if (state.modal !== m) return;                        // closed, or another product opened
+    m.detail = d;
+    // Start on the first variant that is in stock.
+    const first = d.variants.find(v => v.StockQty > 0) || d.variants[0];
+    m.vid = first ? first.VariantID : null;
+  } catch (e) { if (state.modal === m) m.error = e.message; }
+  render();
+}
+function productDialog() {
+  const m = state.modal, p = prods[m.pid], d = m.detail;
+  const close = '<button class="x" data-act="close" aria-label="Close">×</button>';
+  if (!d) return '<div class="backdrop" data-act="backdrop"><section class="dialog" role="dialog" aria-modal="true" aria-label="Product" tabindex="-1">' + close + loading(m.error || 'Loading product…') + '</section></div>';
+  const v = d.variants.find(x => x.VariantID === m.vid), left = v ? v.StockQty : 0;
+  const s = sellers[d.SellerID], pics = d.images.map(i => imgSrc(i.URL)), similar = similarTo(p);
+  const rating = d.AvgRating == null ? 0 : Number(d.AvgRating);
+  const opts = d.variants.map(x => '<button class="opt" data-act="variant" data-id="' + x.VariantID + '" aria-pressed="' + (x.VariantID === m.vid) + '"' + (x.StockQty === 0 ? ' disabled' : '') + '>' + esc(vLabel(x)) + '<small>' + money(x.Price) + (x.StockQty === 0 ? ', sold out' : '') + '</small></button>').join('');
+  const stockText = !v ? 'Not available yet' : left === 0 ? 'Sold out' : left < 10 ? 'Only ' + left + ' left' : left + ' in stock';
+  const revList = d.reviews.length ? d.reviews.map(x => '<div class="review"><span aria-hidden="true" style="color:var(--saffron-deep)">' + stars(x.Rating) + '</span> <span class="sr">' + x.Rating + ' out of 5</span> <b>' + esc(x.CustomerName) + '</b> <span class="muted">' + fmtDate(x.ReviewDate) + '</span><br>' + esc(x.Comment) + '</div>').join('') : '<p class="muted">No reviews yet.</p>';
+  return '<div class="backdrop" data-act="backdrop"><section class="dialog" role="dialog" aria-modal="true" aria-labelledby="dlg-title" tabindex="-1">' + close +
+    '<div class="dlg-grid"><div class="dlg-media"><div class="dlg-tile" style="background:' + colorOf(p) + '">' + esc(initials(p.name)) + (pics[m.img] ? PIC(pics[m.img]) : '') + '</div>' +
+    (pics.length > 1 ? '<div class="thumbs">' + pics.map((src, i) => '<button class="thumb" data-act="thumb" data-id="' + i + '" aria-pressed="' + (i === m.img) + '" aria-label="Picture ' + (i + 1) + ' of ' + pics.length + '"><img src="' + esc(src) + '" alt="" onerror="this.parentNode.remove()"></button>').join('') + '</div>' : '') + '</div>' +
+    '<div class="dlg-info"><h2 id="dlg-title">' + esc(d.ProductName) + '</h2>' +
+      '<p class="muted">' + esc(catPath(d.CategoryID).join(' / ')) + ', sold by ' + esc(d.SellerName) + (s ? ' (seller rating ' + Number(s.Rating).toFixed(1) + ')' : '') + '</p>' +
+      '<p class="rating">' + ratingText(d.ReviewCount, rating, ' from ') + '</p>' +
+      '<p>' + esc(d.Description) + '</p>' +
+      (d.variants.length ? '<fieldset><legend>Choose a style</legend><div class="opts">' + opts + '</div></fieldset>' : '') +
+      '<p class="stock' + (left < 10 ? ' low' : '') + '">' + stockText + (v ? ' <span class="muted">(code ' + esc(v.SKU) + ')</span>' : '') + '</p>' +
+      '<div class="row"><div class="stepper" role="group" aria-label="Quantity"><button data-act="qty-dec" aria-label="Decrease quantity">−</button><span>' + m.qty + '</span><button data-act="qty-inc" aria-label="Increase quantity">+</button></div>' +
+      '<button class="btn primary" data-act="later" data-what="Adding to the cart"' + (left === 0 ? ' disabled' : '') + '>Add to cart, ' + money((v ? v.Price : 0) * m.qty) + '</button>' +
+      '<button class="btn" data-act="later" data-what="The wishlist">Save to wishlist</button></div>' +
+    '</div></div>' +
+    (similar.length ? '<div class="similar"><h3>You may also like</h3><div class="grid small">' + similar.map(x => cardHTML(x)).join('') + '</div></div>' : '') +
+    '<div class="reviews"><h3>Reviews</h3>' + revList + '<p class="muted" style="margin-top:14px">Writing a review comes in a later step.</p></div>' +
+  '</section></div>';
+}
+
 // ---------- category menu ----------
 // The menu lists the main categories. A main category with subcategories opens as a dropdown.
 const CHEVRON = '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>';
@@ -228,12 +290,17 @@ function render() {
   $('#main').innerHTML = state.loadError ?
       '<div class="empty"><h2>The shop could not load</h2><p>' + esc(state.loadError) + '</p><button class="btn primary" data-act="retry">Try again</button></div>' :
     !state.ready ? loading('Loading the shop…') : (views[state.view] || homeView)();
-  // overlay: only the category menu so far
-  const key = state.overlay || '';
-  $('#overlay').innerHTML = state.overlay === 'menu' ? menuDrawer() : '';
+  // overlays (keep the scroll position while the same dialog is redrawn)
+  const key = state.overlay ? state.overlay + (state.modal ? state.modal.pid : '') : '';
+  const ov = $('#overlay'), oldBox = ov.querySelector('[tabindex="-1"]');
+  const keepTop = oldBox && key && key === lastOverlayKey ? oldBox.scrollTop : 0;
+  const overlays = { menu: menuDrawer, product: productDialog };
+  ov.innerHTML = overlays[state.overlay] ? overlays[state.overlay]() : '';
   document.body.classList.toggle('locked', !!state.overlay);
-  const box = $('#overlay [tabindex="-1"]');
-  if (key && key !== lastOverlayKey && box) box.focus();
+  const box = ov.querySelector('[tabindex="-1"]');
+  if (box && keepTop) box.scrollTop = keepTop;
+  if (key && key !== lastOverlayKey) { if (box) box.focus(); }          // a new dialog: focus it
+  else if (keep && state.overlay) { const el = ov.querySelector(keep); if (el) el.focus(); }
   else if (keep) { const el = document.querySelector(keep); if (el) el.focus(); }
   lastOverlayKey = key;
 }
@@ -242,7 +309,7 @@ function toast(msg) {
   const t = $('#toast'); t.textContent = msg; t.classList.add('show');
   clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 2800);
 }
-function closeOverlay() { state.overlay = null; }
+function closeOverlay() { state.overlay = null; state.modal = null; }
 function showView(v) { state.view = v; closeOverlay(); render(); window.scrollTo(0, 0); }
 function clearSearch() { state.query = ''; $('#q').value = ''; }
 
@@ -256,7 +323,7 @@ document.addEventListener('click', e => {
       if (el.dataset.view === 'shop') { state.cat = 0; clearSearch(); search(0); }
       showView(el.dataset.view); break;
     case 'retry': start(); break;
-    case 'menu-open': state.menuOpen = {}; if (state.cat) state.menuOpen[topOf(state.cat).id] = true; state.overlay = 'menu'; render(); break;
+    case 'menu-open': state.modal = null; state.menuOpen = {}; if (state.cat) state.menuOpen[topOf(state.cat).id] = true; state.overlay = 'menu'; render(); break;
     case 'menu-toggle': state.menuOpen[id] = !state.menuOpen[id]; render(); break;
     case 'menu-cat': state.cat = id; clearSearch(); search(0); showView('shop'); break;
     case 'clear-cat': state.cat = 0; search(0); render(); break;
@@ -264,8 +331,16 @@ document.addEventListener('click', e => {
     case 'clear': state.cat = 0; clearSearch(); search(0); render(); break;
     case 'backdrop': if (e.target === el) { closeOverlay(); render(); } break;
     case 'close': closeOverlay(); render(); break;
+    // product details
+    case 'open': openProduct(id); break;
+    case 'thumb': state.modal.img = id; render(); break;
+    case 'variant': state.modal.vid = id; state.modal.qty = 1; render(); break;
+    case 'qty-dec': state.modal.qty = Math.max(1, state.modal.qty - 1); render(); break;
+    case 'qty-inc': {                                     // never more than the variant's stock
+      const v = state.modal.detail && state.modal.detail.variants.find(x => x.VariantID === state.modal.vid);
+      state.modal.qty = Math.min(Math.max(1, v ? v.StockQty : 1), state.modal.qty + 1); render(); break;
+    }
     // Connected in the next steps
-    case 'open': toast('Product pages come in the next step.'); break;
     case 'cart-open': toast('The cart comes in a later step.'); break;
     case 'later': toast(el.dataset.what + ' comes in a later step.'); break;
   }
@@ -285,7 +360,7 @@ document.addEventListener('change', e => {
 document.addEventListener('keydown', e => {
   if (!state.overlay) return;
   if (e.key === 'Escape') { closeOverlay(); render(); return; }
-  if (e.key === 'Tab') {                                  // keep the keyboard inside the open menu
+  if (e.key === 'Tab') {                                  // keep the keyboard inside the open menu or dialog
     const box = $('#overlay [tabindex="-1"]'); if (!box) return;
     const f = box.querySelectorAll('button:not([disabled]),input,select,textarea,[href]');
     if (!f.length) return;
