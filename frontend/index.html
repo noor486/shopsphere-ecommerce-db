@@ -30,7 +30,7 @@
 <nav class="dock" aria-label="Main">
   <button data-act="nav" data-view="home"><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><path d="M3 11l9-8 9 8v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>Home</button>
   <button data-act="nav" data-view="wishlist"><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>Wishlist<span class="count" id="n-wish" hidden>0</span></button>
-  <button data-act="later" data-what="My orders"><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><path d="M21 8l-9-5-9 5v8l9 5 9-5z"/><path d="M3 8l9 5 9-5M12 13v8"/></svg>My orders</button>
+  <button data-act="nav" data-view="orders"><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><path d="M21 8l-9-5-9 5v8l9 5 9-5z"/><path d="M3 8l9 5 9-5M12 13v8"/></svg>My orders</button>
   <button data-act="profile-open"><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>Profile</button>
 </nav>
 <div id="overlay"></div>
@@ -59,11 +59,15 @@
       GET /api/coupons/:code                   check a coupon code before checkout
       POST /api/customers/:id/addresses        save a new address typed at checkout
       POST /api/customers/:id/orders           checkout, using the stored procedure sp_PlaceOrder
+      GET /api/customers/:id/orders            order history, from the view vw_OrderSummary
+      GET /api/orders/:id                      one order with its items and payments
+      POST /api/orders/:id/cancel              cancel an order (one transaction in the API)
   - The page keeps a copy of what it loaded and draws itself from it (render).
   - The logged-in customer's ID is remembered in this browser (localStorage), so a
     refresh keeps you logged in. Logging out forgets it.
   - Connected so far: browsing and search (5.1), product details (5.2), accounts (5.3),
-    wishlist (5.4), cart and coupons (5.5), checkout (5.6). Order history comes next.
+    wishlist (5.4), cart and coupons (5.5), checkout (5.6), my orders (5.7).
+    Writing reviews comes next.
 */
 (function () {
 'use strict';
@@ -95,6 +99,8 @@ const state = {
   coupon: null, couponInput: '', couponMsg: '',   // the coupon applied in the cart: { code, type, value }
   checkout: null,                  // the checkout form: { addressId, method, line1, city, postal, country, error }
   confirm: null,                   // the order sp_PlaceOrder returned (a vw_OrderSummary row)
+  orders: [], ordersLoaded: false, // order history: GET /api/orders/:id for each order
+  cancelAsk: null,                 // the OrderID whose "Are you sure?" is showing
   form: {}                         // what is typed in the log-in / sign-up dialog
 };
 const cid = () => state.customer && state.customer.CustomerID;
@@ -251,6 +257,33 @@ function wishView() {
   return '<div class="shop-head"><h1>Wishlist</h1></div><div class="toolbar"><p class="count">' + list.length + ' saved product' + (list.length === 1 ? '' : 's') + '</p></div><div class="grid">' + list.map(p => cardHTML(p)).join('') + '</div>';
 }
 
+// ---------- my orders ----------
+// One card per order: its items (OrderItem, with the price paid), coupon saving, total,
+// every payment attempt, the shipment, and a Cancel button while it has not shipped.
+function ordersView() {
+  if (!cid()) return guestPrompt('Log in to see your orders', 'Your orders are kept in your account.');
+  if (!state.ordersLoaded) return loading('Loading your orders…');
+  if (!state.orders.length) return '<div class="empty"><h2>No orders yet</h2><p>Add something to the cart and check out.</p><button class="btn primary" data-act="nav" data-view="shop">Browse the shop</button></div>';
+  return '<div class="shop-head"><h1>My orders</h1></div>' + state.orders.map(o => {
+    const rows = o.items.map(i => '<tr><td>' + esc(i.ProductName) + '<br><small>' + esc(vLabel(i)) + '</small></td><td class="r">' + i.Quantity + '</td><td class="r">' + money(i.UnitPrice) + '</td><td class="r">' + money(i.LineTotal) + '</td></tr>').join('');
+    const canCancel = o.OrderStatus === 'Pending' || o.OrderStatus === 'Processing';
+    const cancel = !canCancel ? '' : state.cancelAsk === o.OrderID ?
+      '<div class="row"><span>Cancel order ' + o.OrderID + '? Its items go back in stock and a completed payment is refunded.</span>' +
+        '<button class="btn danger" data-act="cancel-yes" data-id="' + o.OrderID + '">Yes, cancel it</button><button class="btn" data-act="cancel-no">Keep the order</button></div>' :
+      '<div class="row"><button class="btn danger" data-act="cancel-order" data-id="' + o.OrderID + '">Cancel order</button></div>';
+    return '<section class="order"><div class="order-head"><h2>Order ' + o.OrderID + '</h2><span>' + fmtDate(o.OrderDate) + ' <span class="chip s-' + esc(o.OrderStatus) + '">' + esc(o.OrderStatus) + '</span></span></div>' +
+      '<table><thead><tr><th>Item</th><th class="r">Qty</th><th class="r">Price</th><th class="r">Total</th></tr></thead><tbody>' + rows + '</tbody></table>' +
+      '<div class="facts">' +
+        (o.CouponCode ? '<div>Coupon ' + esc(o.CouponCode) + ' saved you ' + money(o.Discount) + '</div>' : '') +
+        '<div><b>Order total: ' + money(o.TotalAmount) + '</b></div>' +
+        o.payments.map(p => '<div>Payment: ' + esc(p.Method) + ', ' + money(p.Amount) + ' <span class="chip s-' + esc(p.Status) + '">' + esc(p.Status) + '</span></div>').join('') +
+        (o.ShipmentStatus ? '<div>Shipment: <span class="chip s-' + esc(o.ShipmentStatus) + '">' + esc(o.ShipmentStatus) + '</span>' + (o.Carrier ? ' with ' + esc(o.Carrier) + (o.TrackingNumber ? ', tracking ' + esc(o.TrackingNumber) : '') : '') + '</div>' : '') +
+        (o.ShipToCity ? '<div>Ship to: ' + esc(o.ShipToCity) + '</div>' : '') +
+      '</div>' + cancel +
+    '</section>';
+  }).join('');
+}
+
 // ---------- product details ----------
 // Opens over the page. The product's row from vw_ProductCatalog (already loaded) shows the
 // name and colour at once; GET /api/products/:id then brings the variants, images and reviews.
@@ -349,7 +382,7 @@ function confirmDialog() {
     '<h2 id="ok-title" style="margin-bottom:8px">Order ' + o.OrderID + ' placed</h2>' +
     '<p>' + o.ItemCount + ' item' + (o.ItemCount === 1 ? '' : 's') + ', total ' + money(o.TotalAmount) + (Number(o.Discount) ? ' (you saved ' + money(o.Discount) + ' with ' + esc(o.CouponCode) + ')' : '') + '.</p>' +
     '<p>Payment by ' + esc(o.PaymentMethod) + ' is <b>' + esc(o.PaymentStatus).toLowerCase() + '</b> until the shop confirms it. We will send your order to ' + esc(o.ShipToCity) + '.</p>' +
-    '<div class="row"><button class="btn primary" data-act="later" data-what="My orders">View my orders</button><button class="btn" data-act="close">Keep shopping</button></div></section></div>';
+    '<div class="row"><button class="btn primary" data-act="go-orders">View my orders</button><button class="btn" data-act="close">Keep shopping</button></div></section></div>';
 }
 
 // ---------- account: profile page, log-in and sign-up dialogs ----------
@@ -418,7 +451,7 @@ function render() {
   const cartN = state.cart.reduce((s, l) => s + l.Quantity, 0);    // number of items, not lines
   $('#n-cart').hidden = cartN === 0; $('#n-cart').textContent = cartN;
   if (state.view === 'profile' && !cid()) state.view = 'home';     // logged out while on the profile
-  const views = { home: homeView, shop: shopView, profile: profileView, wishlist: wishView };
+  const views = { home: homeView, shop: shopView, profile: profileView, wishlist: wishView, orders: ordersView };
   $('#main').innerHTML = state.loadError ?
       '<div class="empty"><h2>The shop could not load</h2><p>' + esc(state.loadError) + '</p><button class="btn primary" data-act="retry">Try again</button></div>' :
     !state.ready ? loading('Loading the shop…') : (views[state.view] || homeView)();
@@ -445,7 +478,11 @@ function toast(msg) {
   clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 2800);
 }
 function closeOverlay() { state.overlay = null; state.modal = null; state.checkout = null; state.couponMsg = ''; }
-function showView(v) { state.view = v; closeOverlay(); render(); window.scrollTo(0, 0); }
+function showView(v) {
+  state.view = v; state.cancelAsk = null; closeOverlay(); render(); window.scrollTo(0, 0);
+  // Statuses change when the shop marks an order paid, shipped or delivered, so ask again each time.
+  if (v === 'orders' && cid()) loadOrders().then(render, e => toast(e.message));
+}
 function clearSearch() { state.query = ''; $('#q').value = ''; }
 
 // Runs one action at a time, so a double click cannot send the same request twice.
@@ -509,7 +546,7 @@ async function doSignup() {
 function logout() {
   try { localStorage.removeItem(SAVED_LOGIN); } catch (e) { /* ignore */ }
   state.customer = null; state.addresses = []; state.wish = []; state.cart = [];
-  state.coupon = null; state.couponInput = '';
+  state.coupon = null; state.couponInput = ''; state.orders = []; state.ordersLoaded = false;
   showView('home'); toast('Logged out');
 }
 
@@ -582,12 +619,35 @@ async function placeOrder() {
     state.cart = []; state.coupon = null; state.checkout = null;
     state.confirm = order; state.overlay = 'confirm'; render();
     refreshCatalog();                        // stock went down and "Most ordered" changed
+    loadOrders().then(render, () => {});     // the new order appears in My orders
   } catch (e) {
     c.placing = false; c.error = e.message; render();
     // The cart may have changed meanwhile (e.g. stock ran out), so show the latest one.
     api.get(cartPath()).then(cart => { state.cart = cart.items; render(); }, () => {});
   }
 }
+// ---------- my orders ----------
+// The list comes from vw_OrderSummary (newest first); then each order's items and payments.
+async function loadOrders() {
+  const id = cid();
+  const list = await api.get('/customers/' + id + '/orders');
+  const details = await Promise.all(list.map(o => api.get('/orders/' + o.OrderID)));
+  if (cid() !== id) return;                  // logged out meanwhile
+  state.orders = details; state.ordersLoaded = true;
+}
+// POST /api/orders/:id/cancel. In one transaction the API refunds a completed payment (or
+// cancels a pending one), cancels the shipment, puts the items back in stock and cancels the
+// order. Shipped or delivered orders are refused (400).
+async function cancelOrder(orderId) {
+  state.cancelAsk = null;
+  try {
+    await api.post('/orders/' + orderId + '/cancel');
+    toast('Order ' + orderId + ' cancelled');
+  } catch (e) { toast(e.message); }
+  await loadOrders(); render();
+  refreshCatalog();                          // stock went back up
+}
+
 // Load the products again (stock, ratings and sales change after an order).
 async function refreshCatalog() {
   try { await loadCatalog(); if (state.results) search(0); render(); } catch (e) { toast(e.message); }
@@ -649,6 +709,11 @@ document.addEventListener('click', e => {
     // checkout
     case 'checkout-open': openCheckout(); break;
     case 'place': once(placeOrder); break;
+    // my orders
+    case 'go-orders': showView('orders'); break;
+    case 'cancel-order': state.cancelAsk = id; render(); break;
+    case 'cancel-no': state.cancelAsk = null; render(); break;
+    case 'cancel-yes': once(() => cancelOrder(id)); break;
     // account
     case 'login-open': openLogin(); break;
     case 'signup-open': state.form = newForm(); state.modal = null; state.overlay = 'signup'; render(); break;
