@@ -1,5 +1,9 @@
 // ShopSphere REST API (Node.js + Express + SQL Server)
-// Start with:  npm start     then open http://localhost:3000/api/health
+// Start with:  npm start     then open http://localhost:3000
+//   http://localhost:3000             the shop (frontend/index.html)
+//   http://localhost:3000/admin.html  the admin pages (frontend/admin.html)
+//   http://localhost:3000/api/...     the API itself
+const path = require('path');
 const express = require('express');
 const db = require('./db');
 
@@ -16,10 +20,14 @@ app.use((req, res, next) => {
   next();
 });
 
-// GET / - opening http://localhost:3000 in a browser shows where to start.
-app.get('/', (req, res) => {
+// The web pages (presentation tier). Express sends the files in the
+// frontend folder as they are, so http://localhost:3000 opens the shop.
+app.use(express.static(path.join(__dirname, '..', 'frontend')));
+
+// GET /api - a short list of URLs to try.
+app.get('/api', (req, res) => {
   res.json({
-    message: 'ShopSphere API is running. All endpoints start with /api (see backend/README.md).',
+    message: 'ShopSphere API is running. See backend/README.md for every endpoint.',
     tryThese: [
       '/api/health',
       '/api/categories',
