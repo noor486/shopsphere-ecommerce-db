@@ -63,6 +63,23 @@ router.patch('/variants/:id/stock', async (req, res) => {
 
 // ===================== Payments and shipping =====================
 
+// GET /api/admin/orders?status=Pending
+// Every order, newest first (uses the view vw_OrderSummary), optionally
+// only one status. PaymentID is the latest payment, the one the admin
+// marks as paid or failed.
+router.get('/orders', async (req, res) => {
+  let text =
+    `SELECT s.*, (SELECT MAX(p.PaymentID) FROM Payment p WHERE p.OrderID = s.OrderID) AS PaymentID
+     FROM vw_OrderSummary s`;
+  const params = {};
+  if (req.query.status) {
+    text += ' WHERE s.OrderStatus = @status';
+    params.status = req.query.status;
+  }
+  text += ' ORDER BY s.OrderDate DESC, s.OrderID DESC';
+  res.json(await query(text, params));
+});
+
 // Which payment status may follow which (the proposal's workflow).
 const NEXT_PAYMENT_STATUS = {
   Pending: ['Completed', 'Failed'],
