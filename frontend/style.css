@@ -246,6 +246,13 @@ body.admin{padding-bottom:32px}
 .tabs{display:flex;gap:6px;flex-wrap:wrap;background:var(--ink);padding:0 clamp(12px,3vw,32px) 14px}
 .tab{background:transparent;color:#CFE0DE;border:1px solid #4A6F75;border-radius:999px;padding:7px 16px;font-weight:600}
 .tab[aria-current="page"]{background:#fff;color:var(--ink);border-color:#fff}
+.tabs[hidden]{display:none}
+.admin .top-right{gap:14px}
+.admin-user{display:flex;align-items:center;gap:10px;color:#CFE0DE;font-size:15px;white-space:nowrap}
+.admin-user .btn{padding:5px 12px;background:transparent;color:#fff;border-color:#6F8F93}
+.form-card.login-card{max-width:420px;margin:40px auto}
+.login-card h1{font-size:28px;margin-bottom:4px}
+@media (max-width:640px){.admin-user .who,.admin .logo small{display:none}}
 .admin-note{margin:0 0 16px;color:var(--ink-soft);font-size:15px}
 .filters-bar{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 16px}
 .filter{background:#fff;color:var(--ink);border:1px solid var(--line);border-radius:999px;padding:5px 14px;font-weight:600}
