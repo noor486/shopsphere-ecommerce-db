@@ -47,7 +47,7 @@
       GET /api/products?search=&categoryId=    the search box and the category menu
       GET /api/products/:id                    one product with its variants, images and reviews
       GET /api/sellers                         seller names and ratings
-      GET /api/admin/reports/top-products      units sold, for "Most ordered"
+      GET /api/bestsellers                     units sold per product, for "Most ordered"
       POST /api/customers/login                log in (email + password)
       POST /api/customers/register             create an account
       GET /api/customers/:id                   the logged-in customer (after a page refresh)
@@ -146,7 +146,7 @@ function similarTo(p) {
 // ---------- loading from the API ----------
 async function loadCatalog() {
   const [catRows, productRows, sellerRows, top] = await Promise.all([
-    api.get('/categories'), api.get('/products'), api.get('/sellers'), api.get('/admin/reports/top-products')]);
+    api.get('/categories'), api.get('/products'), api.get('/sellers'), api.get('/bestsellers')]);
   catList = catRows.map(c => ({ id: c.CategoryID, name: c.Name, parentId: c.ParentCategoryID }));
   cats = Object.fromEntries(catList.map(c => [c.id, c]));
   prodList = productRows.map(toProduct);
