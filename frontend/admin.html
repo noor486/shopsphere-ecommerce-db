@@ -32,10 +32,15 @@
       PATCH /api/admin/payments/:id            Pending -> Completed (paid) or Failed
       PATCH /api/admin/orders/:id/shipment     Shipped (carrier, tracking) or Delivered
       POST  /api/orders/:id/cancel             cancel an order (one transaction in the API)
+      GET   /api/products, /categories, /sellers   the product list (vw_ProductCatalog) and the form choices
+      GET   /api/products/:id                  one product's variants
+      POST  /api/admin/products                add a product
+      POST  /api/admin/products/:id/variants   add a variant (size, colour, SKU, price, stock)
+      PATCH /api/admin/variants/:id/stock      restock (+25) or correct (-3) a variant's stock
   The payment and shipment updates also run in transactions in the API, so the order's
   status always changes together with its payment or shipment.
   There is no admin login: the proposal lists production-grade security as out of scope.
-  Step 6.1: orders. Products and stock (6.2) and reports (6.3) come next.
+  Done: orders (step 6.1), products and stock (6.2). Reports (6.3) come next.
 */
 (function () {
 'use strict';
@@ -50,7 +55,12 @@ const state = {
   filter: '',                     // '' = all, or one order status
   items: {},                      // OrderID -> GET /api/orders/:id result, while "Show items" is open
   shipping: null,                 // the ship form: { orderId, carrier, tracking, error }
-  cancelAsk: null                 // OrderID whose "Are you sure?" is showing
+  cancelAsk: null,                // OrderID whose "Are you sure?" is showing
+  // products tab
+  products: [], cats: [], sellers: [], prodLoaded: false, prodError: '',
+  prodQuery: '',                  // the search box above the product list
+  addForm: null,                  // the add-product form: { name, description, categoryId, sellerId, basePrice, error }
+  manage: null                    // the open product: { pid, detail, change: { VariantID: '25' }, stockError, variant: {...} }
 };
 
 // ---------- loading ----------
@@ -93,9 +103,9 @@ function actionsFor(o) {
 function shipForm(o) {
   const f = state.shipping;
   return '<div class="ship-form">' +
-    '<div class="field"><label for="carrier"><span>Carrier</span></label><select id="carrier" data-bind="carrier">' +
+    '<div class="field"><label for="carrier"><span>Carrier</span></label><select id="carrier" data-bind="shipping.carrier">' +
       CARRIERS.map(c => '<option' + (f.carrier === c ? ' selected' : '') + '>' + esc(c) + '</option>').join('') + '</select></div>' +
-    '<div class="field"><label for="tracking"><span>Tracking number</span></label><input id="tracking" data-bind="tracking" value="' + esc(f.tracking) + '" placeholder="e.g. TRK-' + o.OrderID + '"></div>' +
+    '<div class="field"><label for="tracking"><span>Tracking number</span></label><input id="tracking" data-bind="shipping.tracking" value="' + esc(f.tracking) + '" placeholder="e.g. TRK-' + o.OrderID + '"></div>' +
     '<button class="btn primary" data-act="ship" data-id="' + o.OrderID + '">Mark shipped</button>' +
     '<button class="btn" data-act="ship-close">Back</button>' +
     (f.error ? '<p class="err" style="flex-basis:100%">' + esc(f.error) + '</p>' : '') +
@@ -141,15 +151,107 @@ function ordersTab() {
     (list.length ? list.map(orderRow).join('') : '<p class="muted">No ' + esc(state.filter.toLowerCase()) + ' orders.</p>');
 }
 
+// ---------- products tab ----------
+async function loadProducts() {
+  try {
+    const [rows, cats, sellers] = await Promise.all([api.get('/products'), api.get('/categories'), api.get('/sellers')]);
+    state.products = rows; state.cats = cats; state.sellers = sellers;
+    state.prodLoaded = true; state.prodError = '';
+  } catch (e) { state.prodError = e.message; }
+  render();
+}
+// "Electronics / Laptops" for a subcategory, "Books" for a main category.
+function catLabel(id) {
+  const c = state.cats.find(x => x.CategoryID === id);
+  if (!c) return '';
+  const parent = state.cats.find(x => x.CategoryID === c.ParentCategoryID);
+  return (parent ? parent.Name + ' / ' : '') + c.Name;
+}
+const priceRange = p => p.MinPrice == null ? money(p.BasePrice) + ' <span class="muted">(base)</span>'
+  : Number(p.MinPrice) === Number(p.MaxPrice) ? money(p.MinPrice) : money(p.MinPrice) + ' – ' + money(p.MaxPrice);
+const field = (id, label, bind, value, type, extra) => '<div class="field' + (extra || '') + '"><label for="' + id + '"><span>' + label + '</span></label><input id="' + id + '" type="' + (type || 'text') + '" data-bind="' + bind + '" value="' + esc(value) + '"></div>';
+
+function addProductForm() {
+  const f = state.addForm;
+  const cats = state.cats.slice().sort((a, b) => catLabel(a.CategoryID).localeCompare(catLabel(b.CategoryID)));
+  return '<section class="form-card"><h2>Add a product</h2><p class="muted">After adding it, add its first variant (size, colour, SKU, price and stock) so customers can buy it.</p>' +
+    '<div class="form-grid">' +
+      field('np-name', 'Name', 'addForm.name', f.name) +
+      '<div class="field"><label for="np-cat"><span>Category</span></label><select id="np-cat" data-bind="addForm.categoryId"><option value="">Choose a category</option>' +
+        cats.map(c => '<option value="' + c.CategoryID + '"' + (String(f.categoryId) === String(c.CategoryID) ? ' selected' : '') + '>' + esc(catLabel(c.CategoryID)) + '</option>').join('') + '</select></div>' +
+      '<div class="field"><label for="np-seller"><span>Seller</span></label><select id="np-seller" data-bind="addForm.sellerId"><option value="">Choose a seller</option>' +
+        state.sellers.map(s => '<option value="' + s.SellerID + '"' + (String(f.sellerId) === String(s.SellerID) ? ' selected' : '') + '>' + esc(s.StoreName) + '</option>').join('') + '</select></div>' +
+      field('np-price', 'Base price (Rs)', 'addForm.basePrice', f.basePrice, 'number') +
+      '<div class="field wide"><label for="np-desc"><span>Description (optional)</span></label><textarea id="np-desc" rows="2" data-bind="addForm.description">' + esc(f.description) + '</textarea></div>' +
+    '</div>' +
+    (f.error ? '<p class="err" id="np-err">' + esc(f.error) + '</p>' : '') +
+    '<div class="row"><button class="btn primary" data-act="add-product">Add product</button><button class="btn" data-act="add-cancel">Cancel</button></div></section>';
+}
+
+// The open product: its variants with a stock box each, and the add-variant form.
+function managePanel(p) {
+  const m = state.manage;
+  if (!m.detail) return '<tr class="panel"><td colspan="7"><p class="loading" style="margin:16px 0">Loading variants…</p></td></tr>';
+  const vs = m.detail.variants, f = m.variant;
+  const table = vs.length ?
+    '<table><thead><tr><th>SKU</th><th>Size</th><th>Colour</th><th class="r">Price</th><th class="r">Stock</th><th>Restock (+) or correct (−)</th></tr></thead><tbody>' +
+      vs.map(v => '<tr><td><b>' + esc(v.SKU) + '</b></td><td data-label="Size">' + esc(v.Size || '—') + '</td><td data-label="Colour">' + esc(v.Color || '—') + '</td><td class="r" data-label="Price">' + money(v.Price) + '</td>' +
+        '<td class="r' + (v.StockQty < 10 ? ' low' : '') + '" data-label="Stock">' + v.StockQty + '</td>' +
+        '<td><div class="stock-change"><input type="number" step="1" id="chg-' + v.VariantID + '" data-bind="manage.change.' + v.VariantID + '" value="' + esc(m.change[v.VariantID] || '') + '" placeholder="e.g. 25" aria-label="Stock change for ' + esc(v.SKU) + '">' +
+        '<button class="btn" data-act="stock" data-id="' + v.VariantID + '">Update</button></div></td></tr>').join('') + '</tbody></table>' :
+    '<p class="err" style="margin:10px 0">No variants yet, so customers cannot buy this product. Add the first one below.</p>';
+  return '<tr class="panel"><td colspan="7">' +
+    (m.stockError ? '<p class="err">' + esc(m.stockError) + '</p>' : '') + table +
+    '<b>Add a variant</b>' +
+    '<div class="form-grid">' +
+      field('nv-sku', 'SKU (unique code)', 'manage.variant.sku', f.sku) + field('nv-size', 'Size (optional)', 'manage.variant.size', f.size) +
+      field('nv-color', 'Colour (optional)', 'manage.variant.color', f.color) + field('nv-price', 'Price (Rs)', 'manage.variant.price', f.price, 'number') +
+      field('nv-stock', 'Stock', 'manage.variant.stock', f.stock, 'number') +
+    '</div>' +
+    (f.error ? '<p class="err" id="nv-err">' + esc(f.error) + '</p>' : '') +
+    '<button class="btn primary" data-act="add-variant" data-id="' + p.ProductID + '">Add variant</button>' +
+  '</td></tr>';
+}
+
+function productsTab() {
+  if (state.prodError) return '<div class="empty"><h2>Products could not load</h2><p>' + esc(state.prodError) + '</p><button class="btn primary" data-act="retry-products">Try again</button></div>';
+  if (!state.prodLoaded) return '<p class="loading">Loading products…</p>';
+  const q = state.prodQuery.trim().toLowerCase();
+  const list = state.products.filter(p => !q || p.ProductName.toLowerCase().includes(q) || catLabel(p.CategoryID).toLowerCase().includes(q) || p.SellerName.toLowerCase().includes(q))
+    .sort((a, b) => a.ProductName.localeCompare(b.ProductName));
+  const low = state.products.filter(p => p.TotalStock < 10).length;
+  const row = p => {
+    const open = state.manage && state.manage.pid === p.ProductID;
+    return '<tr data-pid="' + p.ProductID + '"' + (open ? ' class="open"' : '') + '><td><b>' + esc(p.ProductName) + '</b><span class="sub">' + esc(catLabel(p.CategoryID)) + ' · ' + esc(p.SellerName) + ' · ' + p.VariantCount + ' variant' + (p.VariantCount === 1 ? '' : 's') + '</span></td>' +
+      '<td class="c-cat">' + esc(catLabel(p.CategoryID)) + '</td><td class="c-seller">' + esc(p.SellerName) + '</td>' +
+      '<td class="r">' + priceRange(p) + '</td><td class="r c-var">' + p.VariantCount + '</td><td class="r' + (p.TotalStock < 10 ? ' low' : '') + '">' + p.TotalStock + '</td>' +
+      '<td><button class="btn" data-act="manage" data-id="' + p.ProductID + '">' + (open ? 'Close' : 'Manage') + '</button></td></tr>' + (open ? managePanel(p) : '');
+  };
+  return '<div class="shop-head"><h1>Products and stock</h1></div>' +
+    '<p class="admin-note">' + state.products.length + ' products (from the view vw_ProductCatalog), ' + low + ' with less than 10 in stock. Stock is kept per variant (size and colour).</p>' +
+    '<div class="toolbar-admin"><label class="sr" for="psearch">Search products</label><input id="psearch" type="search" placeholder="Search by name, category or seller" data-bind="prodQuery" value="' + esc(state.prodQuery) + '">' +
+      (state.addForm ? '' : '<button class="btn primary" data-act="add-open">Add a product</button>') +
+      (q ? '<span class="muted">' + list.length + ' found</span>' : '') + '</div>' +
+    (state.addForm ? addProductForm() : '') +
+    (list.length ?
+      '<div class="table-wrap"><table class="ptable"><thead><tr><th>Product</th><th class="c-cat">Category</th><th class="c-seller">Seller</th><th class="r">Price</th><th class="r c-var">Variants</th><th class="r">Stock</th><th></th></tr></thead><tbody>' + list.map(row).join('') + '</tbody></table></div>' :
+      '<p class="muted">No products match.</p>');
+}
+
 // ---------- drawing ----------
 function render() {
+  // Redrawing replaces the boxes, so remember which one has the cursor and put it back.
+  const a = document.activeElement, focusId = a && a.id && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) ? a.id : null;
+  const caret = focusId && a.type !== 'number' && a.selectionStart != null ? a.selectionStart : null;
   document.querySelectorAll('.tab').forEach(b => b.setAttribute('aria-current', b.dataset.tab === state.tab ? 'page' : 'false'));
   const tabs = {
     orders: ordersTab,
-    products: () => '<div class="empty"><h2>Products and stock</h2><p>Adding products, variants and stock comes in step 6.2.</p></div>',
+    products: productsTab,
     reports: () => '<div class="empty"><h2>Reports</h2><p>The sales reports come in step 6.3.</p></div>'
   };
   $('#main').innerHTML = tabs[state.tab]();
+  const el = focusId && document.getElementById(focusId);
+  if (el) { el.focus(); if (caret != null) el.setSelectionRange(caret, caret); }
 }
 let toastTimer;
 function toast(msg) {
@@ -191,12 +293,77 @@ async function cancel(orderId) {
   await reload();
 }
 
+// ---------- products: actions ----------
+const newVariant = () => ({ sku: '', size: '', color: '', price: '', stock: '0', error: '' });
+async function openManage(pid) {
+  state.manage = { pid: pid, detail: null, change: {}, stockError: '', variant: newVariant() };
+  render();
+  await loadManage();
+}
+async function loadManage() {
+  const m = state.manage;
+  try { const d = await api.get('/products/' + m.pid); if (state.manage === m) m.detail = d; }
+  catch (e) { if (state.manage === m) m.stockError = e.message; }
+  render();
+}
+// After a change: load the product list again (stock, variant counts) and the open product.
+async function refreshProducts() { await loadProducts(); if (state.manage) await loadManage(); }
+
+// POST /api/admin/products (one INSERT into Product).
+async function addProduct() {
+  const f = state.addForm;
+  if (!f.name.trim() || !f.categoryId || !f.sellerId || f.basePrice === '') { f.error = 'Fill in the name, category, seller and base price.'; render(); return; }
+  let p;
+  try {
+    p = await api.post('/admin/products', { name: f.name.trim(), description: f.description.trim() || null,
+      categoryId: Number(f.categoryId), sellerId: Number(f.sellerId), basePrice: Number(f.basePrice) });
+  } catch (e) { f.error = e.message; render(); return; }
+  state.addForm = null; state.prodQuery = '';
+  toast(p.Name + ' added. Now add its first variant.');
+  await loadProducts();
+  await openManage(p.ProductID);
+  const tr = document.querySelector('tr[data-pid="' + p.ProductID + '"]'); if (tr) tr.scrollIntoView({ block: 'start' });
+  const sku = document.getElementById('nv-sku'); if (sku) sku.focus();
+}
+// PATCH /api/admin/variants/:id/stock. The database refuses stock below zero
+// (CHECK (StockQty >= 0)), which the API reports as a 400.
+async function changeStock(vid) {
+  const m = state.manage, raw = String(m.change[vid] || '').trim(), change = Number(raw);
+  if (!raw || !Number.isInteger(change) || change === 0) { m.stockError = 'Type a whole number: 25 adds 25, -3 takes 3 away.'; render(); return; }
+  try {
+    const v = await api.patch('/admin/variants/' + vid + '/stock', { change: change });
+    m.change[vid] = ''; m.stockError = '';
+    toast(v.SKU + ': stock is now ' + v.StockQty);
+  } catch (e) {
+    m.stockError = e.status === 400 && change < 0 ? 'Stock cannot go below zero (the database has CHECK (StockQty >= 0)).' : e.message; render(); return;
+  }
+  await refreshProducts();
+}
+// POST /api/admin/products/:id/variants. SKU is UNIQUE, so a used SKU comes back as 409.
+async function addVariant(pid) {
+  const f = state.manage.variant, stock = f.stock === '' ? 0 : Number(f.stock);
+  state.manage.stockError = '';              // an old stock message no longer applies
+  if (!f.sku.trim() || f.price === '') { f.error = 'Fill in the SKU and the price.'; render(); return; }
+  if (!Number.isInteger(stock) || stock < 0) { f.error = 'Stock must be a whole number, 0 or more.'; render(); return; }
+  try {
+    const v = await api.post('/admin/products/' + pid + '/variants', { sku: f.sku.trim(), size: f.size.trim() || null,
+      color: f.color.trim() || null, price: Number(f.price), stockQty: stock });
+    state.manage.variant = newVariant();
+    toast('Variant ' + v.SKU + ' added');
+  } catch (e) {
+    f.error = e.status === 409 ? 'SKU ' + f.sku.trim() + ' is already used by another variant (SKU is UNIQUE).' : e.message; render(); return;
+  }
+  await refreshProducts();
+}
+
 // Runs one action at a time, so a double click cannot send the same change twice.
 let busy = false;
 async function once(fn) {
   if (busy) return;
   busy = true;
-  try { await fn(); } catch (e) { toast(e.message); await loadOrders(); } finally { busy = false; }
+  try { await fn(); }
+  catch (e) { toast(e.message); await (state.tab === 'products' ? loadProducts() : loadOrders()); }
+  finally { busy = false; }
 }
 
 // ---------- events ----------
@@ -205,7 +372,10 @@ document.addEventListener('click', e => {
   if (!el) return;
   const id = Number(el.dataset.id);
   switch (el.dataset.act) {
-    case 'tab': state.tab = el.dataset.tab; render(); window.scrollTo(0, 0); break;
+    case 'tab':
+      state.tab = el.dataset.tab; render(); window.scrollTo(0, 0);
+      if (state.tab === 'products' && !state.prodLoaded) loadProducts();
+      break;
     case 'retry': state.loadError = ''; render(); loadOrders(); break;
     case 'filter': state.filter = el.dataset.status; state.shipping = null; state.cancelAsk = null; render(); break;
     case 'items': if (state.items[id]) { delete state.items[id]; render(); } else loadItems(id); break;
@@ -217,17 +387,43 @@ document.addEventListener('click', e => {
     case 'cancel-ask': state.shipping = null; state.cancelAsk = id; render(); break;
     case 'cancel-no': state.cancelAsk = null; render(); break;
     case 'cancel-yes': once(() => cancel(id)); break;
+    // products tab
+    case 'retry-products': state.prodError = ''; render(); loadProducts(); break;
+    case 'add-open': state.addForm = { name: '', description: '', categoryId: '', sellerId: '', basePrice: '', error: '' }; render(); $('#np-name').focus(); break;
+    case 'add-cancel': state.addForm = null; render(); break;
+    case 'add-product': once(addProduct); break;
+    case 'manage': if (state.manage && state.manage.pid === id) { state.manage = null; render(); } else openManage(id); break;
+    case 'stock': once(() => changeStock(id)); break;
+    case 'add-variant': once(() => addVariant(id)); break;
   }
 });
-// The ship form's boxes: keep state.shipping in step with what is typed or chosen.
+// data-bind="addForm.name" means: keep state.addForm.name equal to what is typed in this box.
+function setPath(path, val) {
+  const keys = path.split('.'); let o = state;
+  for (let i = 0; i < keys.length - 1; i++) o = o[keys[i]];
+  o[keys[keys.length - 1]] = val;
+}
 function bind(e) {
-  if (!state.shipping || !e.target.dataset.bind) return;
-  state.shipping[e.target.dataset.bind] = e.target.value;
-  if (state.shipping.error) { state.shipping.error = ''; const err = $('.ship-form .err'); if (err) err.remove(); }   // typing hides the old message
+  const t = e.target, path = t.dataset && t.dataset.bind;
+  if (!path) return;
+  setPath(path, t.value);
+  if (path === 'prodQuery') { render(); return; }      // the product list filters as you type
+  // Typing in a form hides that form's old message.
+  const forms = [['shipping.', state.shipping, '.ship-form .err'], ['addForm.', state.addForm, '#np-err'], ['manage.variant.', state.manage && state.manage.variant, '#nv-err']];
+  forms.forEach(([prefix, f, sel]) => {
+    if (path.startsWith(prefix) && f && f.error) { f.error = ''; const err = $(sel); if (err) err.remove(); }
+  });
 }
 document.addEventListener('input', bind);
 document.addEventListener('change', bind);
-document.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.id === 'tracking') { e.preventDefault(); once(() => ship(state.shipping.orderId)); } });
+// Enter in a box presses the button that belongs to it.
+document.addEventListener('keydown', e => {
+  const t = e.target;
+  if (e.key !== 'Enter' || t.tagName !== 'INPUT' || !t.id) return;
+  const b = t.id === 'tracking' ? $('[data-act="ship"]') : t.id.startsWith('chg-') ? t.closest('.stock-change').querySelector('[data-act="stock"]')
+    : t.id.startsWith('nv-') ? $('[data-act="add-variant"]') : t.id.startsWith('np-') ? $('[data-act="add-product"]') : null;
+  if (b) { e.preventDefault(); b.click(); }
+});
 
 render();
 loadOrders();
