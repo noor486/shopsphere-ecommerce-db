@@ -37,10 +37,11 @@
       POST  /api/admin/products                add a product
       POST  /api/admin/products/:id/variants   add a variant (size, colour, SKU, price, stock)
       PATCH /api/admin/variants/:id/stock      restock (+25) or correct (-3) a variant's stock
+      GET   /api/admin/reports/...             the five sales reports (the proposal's sample queries):
+            top-products, customer-spending, monthly-revenue, category-performance, low-stock?threshold=
   The payment and shipment updates also run in transactions in the API, so the order's
   status always changes together with its payment or shipment.
   There is no admin login: the proposal lists production-grade security as out of scope.
-  Done: orders (step 6.1), products and stock (6.2). Reports (6.3) come next.
 */
 (function () {
 'use strict';
@@ -60,7 +61,11 @@ const state = {
   products: [], cats: [], sellers: [], prodLoaded: false, prodError: '',
   prodQuery: '',                  // the search box above the product list
   addForm: null,                  // the add-product form: { name, description, categoryId, sellerId, basePrice, error }
-  manage: null                    // the open product: { pid, detail, change: { VariantID: '25' }, stockError, variant: {...} }
+  manage: null,                   // the open product: { pid, detail, change: { VariantID: '25' }, stockError, variant: {...} }
+  // reports tab
+  reports: null, repError: '',    // { top, spend, months, cats, low } from the five report endpoints
+  threshold: '10',                // the low-stock report's "fewer than" number
+  monthTable: false               // show the monthly revenue as a table instead of columns
 };
 
 // ---------- loading ----------
@@ -238,6 +243,108 @@ function productsTab() {
       '<p class="muted">No products match.</p>');
 }
 
+// ---------- reports tab ----------
+// Loaded again every time the tab opens, because orders change the numbers.
+async function loadReports() {
+  try {
+    const r = '/admin/reports/';
+    const [top, spend, months, cats, low] = await Promise.all([api.get(r + 'top-products'), api.get(r + 'customer-spending'),
+      api.get(r + 'monthly-revenue'), api.get(r + 'category-performance'), api.get(r + 'low-stock?threshold=' + Number(state.threshold))]);
+    state.reports = { top: top, spend: spend, months: months, cats: cats, low: low }; state.repError = '';
+  } catch (e) { state.repError = e.message; }
+  render();
+}
+async function loadLowStock() {
+  const n = Number(state.threshold);
+  if (!Number.isInteger(n) || n < 1) { toast('Type a whole number of 1 or more.'); return; }
+  state.reports.low = await api.get('/admin/reports/low-stock?threshold=' + n);
+  render();
+}
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+// 1,234 / 12K / 1.2M for axis labels
+const compact = n => n >= 1e6 ? (n / 1e6).toFixed(n % 1e6 ? 1 : 0) + 'M' : n >= 1e3 ? Math.round(n / 1e3) + 'K' : String(Math.round(n));
+// The top of the axis: the next clean number (1, 2 or 5 times a power of ten) above the biggest value.
+function niceMax(v) {
+  if (v <= 0) return 1;
+  const p = Math.pow(10, Math.floor(Math.log10(v))), f = v / p;
+  return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10) * p;
+}
+// The report skips months without orders; put them back as zero so the time axis stays even.
+function everyMonth(rows) {
+  if (!rows.length) return [];
+  const key = r => r.OrderYear * 12 + r.OrderMonth - 1, byKey = {};
+  rows.forEach(r => { byKey[key(r)] = r; });
+  const out = [];
+  for (let k = key(rows[0]); k <= key(rows[rows.length - 1]); k++) {
+    out.push(byKey[k] || { OrderYear: Math.floor(k / 12), OrderMonth: k % 12 + 1, Orders: 0, Revenue: 0 });
+  }
+  return out;
+}
+// A hover/focus tooltip reads data-tip-value and data-tip-label (see the events below).
+const tipAttrs = (value, label) => ' tabindex="0" data-tip-value="' + esc(value) + '" data-tip-label="' + esc(label) + '"';
+
+// Ranked bars: one row per item with its name, a bar (length = value) and the figure.
+function rankList(rows, name, sub, value, shown) {
+  if (!rows.length) return '<p class="muted">Nothing to show yet.</p>';
+  const max = Math.max.apply(null, rows.map(value)) || 1;
+  return '<ol class="rank">' + rows.map(r =>
+    '<li' + tipAttrs(shown(r), name(r) + (sub ? ' · ' + sub(r) : '')) + '><span class="name">' + esc(name(r)) + (sub ? '<small>' + esc(sub(r)) + '</small>' : '') + '</span>' +
+    '<span class="track"><span class="fill" style="width:' + (value(r) / max * 100).toFixed(1) + '%"></span></span><span class="val">' + esc(shown(r)) + '</span></li>').join('') + '</ol>';
+}
+
+// Revenue per month as columns, with the highest and the latest month labelled.
+function monthChart(rows) {
+  if (!rows.length) return '<p class="muted">No orders yet.</p>';
+  const top = niceMax(Math.max.apply(null, rows.map(r => Number(r.Revenue))));
+  const best = rows.reduce((a, b) => Number(b.Revenue) > Number(a.Revenue) ? b : a), last = rows[rows.length - 1];
+  const name = r => MONTHS[r.OrderMonth - 1] + ' ' + r.OrderYear;
+  return '<div class="cols" role="img" aria-label="Revenue per month; the table view lists every value">' +
+      [0, 0.5, 1].map(f => '<div class="gl' + (f === 0 ? ' base' : '') + '" style="bottom:' + (f * 100) + '%"><span>Rs ' + compact(top * f) + '</span></div>').join('') +
+      '<div class="bars">' + rows.map(r => {
+        const pct = (Number(r.Revenue) / top * 100).toFixed(1);
+        return '<div class="col"' + tipAttrs(money(r.Revenue), name(r) + ' · ' + r.Orders + ' order' + (r.Orders === 1 ? '' : 's')) + '><i style="height:' + pct + '%"></i>' +
+          (r === best || r === last ? '<em style="bottom:' + pct + '%">Rs ' + compact(Number(r.Revenue)) + '</em>' : '') + '</div>';
+      }).join('') + '</div>' +
+    '</div><div class="cols-x" aria-hidden="true">' + rows.map(r => '<span>' + MONTHS[r.OrderMonth - 1] + '</span>').join('') + '</div>';
+}
+function monthTable(rows) {
+  return '<table class="data"><thead><tr><th>Month</th><th class="r">Orders</th><th class="r">Revenue</th></tr></thead><tbody>' +
+    rows.map(r => '<tr><td>' + MONTHS[r.OrderMonth - 1] + ' ' + r.OrderYear + '</td><td class="r">' + r.Orders + '</td><td class="r">' + money(r.Revenue) + '</td></tr>').join('') + '</tbody></table>';
+}
+
+function reportsTab() {
+  if (state.repError) return '<div class="empty"><h2>Reports could not load</h2><p>' + esc(state.repError) + '</p><button class="btn primary" data-act="retry-reports">Try again</button></div>';
+  if (!state.reports) return '<p class="loading">Loading reports…</p>';
+  const R = state.reports, months = everyMonth(R.months);
+  const revenue = R.months.reduce((s, m) => s + Number(m.Revenue), 0), orders = R.months.reduce((s, m) => s + m.Orders, 0);
+  const units = R.top.reduce((s, t) => s + t.UnitsSold, 0);
+  const kpi = (label, value) => '<div class="kpi"><span>' + label + '</span><b>' + value + '</b></div>';
+  const period = months.length ? MONTHS[months[0].OrderMonth - 1] + ' ' + months[0].OrderYear + ' to ' + MONTHS[last(months).OrderMonth - 1] + ' ' + last(months).OrderYear : '';
+  const variantName = v => [v.Size, v.Color].filter(x => x && x !== 'N/A' && x !== 'Standard').join(', ');
+  return '<div class="shop-head"><h1>Reports</h1></div>' +
+    '<p class="admin-note">The proposal\'s sample queries, run live on the database. Cancelled orders are left out of every sales figure.</p>' +
+    '<div class="kpis">' + kpi('Revenue', money(revenue)) + kpi('Orders', orders) + kpi('Average order', money(orders ? revenue / orders : 0)) + kpi('Units sold', units) + '</div>' +
+    '<div class="report-grid">' +
+      '<section class="report wide"><div class="report-head"><div><h2>Revenue by month</h2><p>' + period + '</p></div>' +
+        '<button class="link" data-act="month-table">' + (state.monthTable ? 'Show as chart' : 'Show as table') + '</button></div>' +
+        (state.monthTable ? monthTable(months) : monthChart(months)) + '</section>' +
+      '<section class="report"><div class="report-head"><div><h2>Top products</h2><p>Units sold</p></div></div>' +
+        rankList(R.top, t => t.Product, null, t => t.UnitsSold, t => t.UnitsSold + ' sold') + '</section>' +
+      '<section class="report"><div class="report-head"><div><h2>Sales by category</h2><p>Revenue, with units sold</p></div></div>' +
+        rankList(R.cats, c => c.Category, c => c.UnitsSold + ' unit' + (c.UnitsSold === 1 ? '' : 's'), c => Number(c.Revenue), c => money(c.Revenue)) + '</section>' +
+      '<section class="report"><div class="report-head"><div><h2>Customer spending</h2><p>Total spent, with number of orders</p></div></div>' +
+        rankList(R.spend, c => c.Customer, c => c.Orders + ' order' + (c.Orders === 1 ? '' : 's'), c => Number(c.TotalSpent), c => money(c.TotalSpent)) + '</section>' +
+      '<section class="report"><div class="report-head"><div><h2>Low stock</h2><p>' + R.low.length + ' variant' + (R.low.length === 1 ? '' : 's') + ' to restock</p></div>' +
+        '<div class="threshold"><label for="thr">Fewer than</label><input id="thr" type="number" min="1" step="1" data-bind="threshold" value="' + esc(state.threshold) + '"><button class="btn" data-act="low-update">Show</button></div></div>' +
+        (R.low.length ?
+          '<table class="data"><thead><tr><th>Product</th><th>SKU</th><th class="r">Stock</th></tr></thead><tbody>' +
+            R.low.map(v => '<tr><td>' + esc(v.Product) + (variantName(v) ? ' <span class="muted">(' + esc(variantName(v)) + ')</span>' : '') + '</td><td>' + esc(v.SKU) + '</td><td class="r">' + (v.StockQty === 0 ? 'Sold out' : v.StockQty) + '</td></tr>').join('') + '</tbody></table>' :
+          '<p class="muted">Every variant has at least ' + esc(state.threshold) + ' in stock.</p>') + '</section>' +
+    '</div>';
+}
+const last = a => a[a.length - 1];
+
 // ---------- drawing ----------
 function render() {
   // Redrawing replaces the boxes, so remember which one has the cursor and put it back.
@@ -247,12 +354,38 @@ function render() {
   const tabs = {
     orders: ordersTab,
     products: productsTab,
-    reports: () => '<div class="empty"><h2>Reports</h2><p>The sales reports come in step 6.3.</p></div>'
+    reports: reportsTab
   };
+  hideTip();
   $('#main').innerHTML = tabs[state.tab]();
   const el = focusId && document.getElementById(focusId);
   if (el) { el.focus(); if (caret != null) el.setSelectionRange(caret, caret); }
 }
+// ---------- tooltip on report bars (hover or keyboard focus) ----------
+// The values are also printed beside the bars or in the table view; the tooltip only adds detail.
+const tip = document.createElement('div');
+tip.id = 'tip'; tip.setAttribute('role', 'tooltip'); document.body.appendChild(tip);
+function showTip(el, x, y) {
+  tip.textContent = '';                      // built with textContent: names come from the database
+  const b = document.createElement('b'); b.textContent = el.dataset.tipValue;
+  const s = document.createElement('span'); s.textContent = el.dataset.tipLabel;
+  tip.append(b, s); tip.style.display = 'block';
+  const w = tip.offsetWidth, h = tip.offsetHeight;
+  tip.style.left = Math.max(8, Math.min(x + 12, innerWidth - w - 8)) + 'px';
+  tip.style.top = Math.max(8, y - h - 12) + 'px';
+}
+function hideTip() { tip.style.display = 'none'; }
+document.addEventListener('pointermove', e => {
+  const el = e.target.closest && e.target.closest('[data-tip-value]');
+  if (el) showTip(el, e.clientX, e.clientY); else hideTip();
+});
+document.addEventListener('focusin', e => {
+  const el = e.target.closest && e.target.closest('[data-tip-value]');
+  if (el) { const r = el.getBoundingClientRect(); showTip(el, r.left + r.width / 2, r.top); } else hideTip();
+});
+document.addEventListener('focusout', hideTip);
+addEventListener('scroll', hideTip, { passive: true });
+
 let toastTimer;
 function toast(msg) {
   const t = $('#toast'); t.textContent = msg; t.classList.add('show');
@@ -375,7 +508,12 @@ document.addEventListener('click', e => {
     case 'tab':
       state.tab = el.dataset.tab; render(); window.scrollTo(0, 0);
       if (state.tab === 'products' && !state.prodLoaded) loadProducts();
+      if (state.tab === 'reports') loadReports();
       break;
+    // reports tab
+    case 'retry-reports': state.repError = ''; render(); loadReports(); break;
+    case 'month-table': state.monthTable = !state.monthTable; render(); break;
+    case 'low-update': once(loadLowStock); break;
     case 'retry': state.loadError = ''; render(); loadOrders(); break;
     case 'filter': state.filter = el.dataset.status; state.shipping = null; state.cancelAsk = null; render(); break;
     case 'items': if (state.items[id]) { delete state.items[id]; render(); } else loadItems(id); break;
@@ -421,7 +559,8 @@ document.addEventListener('keydown', e => {
   const t = e.target;
   if (e.key !== 'Enter' || t.tagName !== 'INPUT' || !t.id) return;
   const b = t.id === 'tracking' ? $('[data-act="ship"]') : t.id.startsWith('chg-') ? t.closest('.stock-change').querySelector('[data-act="stock"]')
-    : t.id.startsWith('nv-') ? $('[data-act="add-variant"]') : t.id.startsWith('np-') ? $('[data-act="add-product"]') : null;
+    : t.id.startsWith('nv-') ? $('[data-act="add-variant"]') : t.id.startsWith('np-') ? $('[data-act="add-product"]')
+    : t.id === 'thr' ? $('[data-act="low-update"]') : null;
   if (b) { e.preventDefault(); b.click(); }
 });
 
