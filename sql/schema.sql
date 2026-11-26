@@ -609,7 +609,7 @@ FROM (VALUES
     ('zain.abbas@example.com', 'EID20', '2026-04-22T12:25:00', 'Delivered'),
     ('mahnoor.iqbal@example.com', NULL, '2026-05-30T14:15:00', 'Delivered'),
     ('sara.khan@example.com', NULL, '2026-06-18T19:50:00', 'Shipped'),
-    ('hamza.sheikh@example.com', 'SAVE10', '2026-07-07T11:35:00', 'Shipped'),
+    ('hamza.sheikh@example.com', 'SAVE10', '2026-07-07T11:35:00', 'Delivered'),
     ('fatima.noor@example.com', NULL, '2026-08-02T10:55:00', 'Processing'),
     ('danish.aslam@example.com', 'WELCOME500', '2026-08-21T17:20:00', 'Pending'),
     ('ali.raza@example.com', NULL, '2026-09-05T09:45:00', 'Processing')
@@ -697,7 +697,7 @@ FROM (VALUES
     ('2026-04-22T12:25:00', 'TCS', 'TRK-1008', 'Delivered', 1, 2),
     ('2026-05-30T14:15:00', 'Pakistan Post', 'TRK-1009', 'Delivered', 2, 6),
     ('2026-06-18T19:50:00', 'TCS', 'TRK-1010', 'Shipped', 1, NULL),
-    ('2026-07-07T11:35:00', 'Leopards', 'TRK-1011', 'Shipped', 1, NULL),
+    ('2026-07-07T11:35:00', 'Leopards', 'TRK-1011', 'Delivered', 1, 4),
     ('2026-08-02T10:55:00', NULL, NULL, 'Processing', NULL, NULL),
     ('2026-08-21T17:20:00', NULL, NULL, 'Processing', NULL, NULL),
     ('2026-09-05T09:45:00', NULL, NULL, 'Processing', NULL, NULL)
@@ -706,12 +706,14 @@ JOIN [Order] o ON o.OrderDate = CONVERT(DATETIME2, x.OrderDate, 126)
 JOIN Address a ON a.CustomerID = o.CustomerID;
 
 -- ===== Reviews =====
+-- Each review is by a customer who has a Delivered order containing that product,
+-- the same rule the API enforces for new reviews (POST /api/products/:id/reviews).
 INSERT INTO Review (ProductID, CustomerID, Rating, Comment)
 SELECT p.ProductID, c.CustomerID, x.Rating, x.Comment
 FROM (VALUES
     ('ali.raza@example.com', 'Wireless Bluetooth Earbuds', 5, 'Great sound and battery life'),
     ('sara.khan@example.com', 'Men''s Casual Shirt', 4, 'Good fit, fabric is soft'),
-    ('sara.khan@example.com', 'Women''s Kurti', 5, 'Lovely print and comfortable'),
+    ('sara.khan@example.com', 'Men''s Denim Jeans', 4, 'Good denim, true to size'),
     ('bilal.ahmed@example.com', 'Slim Laptop 14-inch', 4, 'Fast and light for daily work'),
     ('ayesha.malik@example.com', 'Non-Stick Cookware Set', 5, 'Cooks evenly and cleans easily'),
     ('ayesha.malik@example.com', 'Electric Kettle 1.7L', 3, 'Works fine but a bit noisy'),
@@ -720,10 +722,8 @@ FROM (VALUES
     ('zain.abbas@example.com', 'Gaming Laptop 15.6-inch', 5, 'Excellent performance for the price'),
     ('mahnoor.iqbal@example.com', 'Women''s Kurti', 4, 'Good quality cotton'),
     ('hamza.sheikh@example.com', 'Adjustable Dumbbell Set', 3, 'Locking mechanism feels loose'),
-    ('fatima.noor@example.com', 'Wireless Bluetooth Earbuds', 4, 'Nice, but the case is a little bulky'),
     ('ali.raza@example.com', 'Wireless Mouse', 5, 'Smooth and quiet clicks'),
-    ('ali.raza@example.com', 'Smartphone 128GB', 4, 'Smooth display and a decent camera'),
-    ('danish.aslam@example.com', 'Men''s Denim Jeans', 3, 'Runs slightly small')
+    ('ali.raza@example.com', 'Smartphone 128GB', 4, 'Smooth display and a decent camera')
 ) AS x (Email, ProductName, Rating, Comment)
 JOIN Customer c ON c.Email = x.Email
 JOIN Product p ON p.Name = x.ProductName;
