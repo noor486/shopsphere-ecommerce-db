@@ -8,14 +8,22 @@
 // Every call returns the JSON the API sent back. If the API replies with an
 // error (400, 404, 409 ...), the call throws an Error whose message is the
 // API's { "error": "..." } text and whose .status is the HTTP status code.
+//
+// Admin pages: after logging in, api.setToken(token) makes every request carry
+//   Authorization: Bearer <token>
+// If the API then answers 401 (the token expired, or the API restarted),
+// api.onUnauthorized() is called so the page can show its log-in screen again.
 
 // Normally the pages are opened from the API itself (http://localhost:3000),
 // so '/api' is enough. If a page is opened straight from disk, it calls the
 // API on localhost:3000 instead.
 const API_BASE = location.protocol === 'file:' ? 'http://localhost:3000/api' : '/api';
 
+let authToken = null;                 // set by the admin page after logging in
+
 async function request(method, path, body) {
   const options = { method: method, headers: {} };
+  if (authToken) options.headers.Authorization = 'Bearer ' + authToken;
   if (body !== undefined) {
     options.headers['Content-Type'] = 'application/json';
     options.body = JSON.stringify(body);
@@ -35,6 +43,8 @@ async function request(method, path, body) {
   try { data = await res.json(); } catch (e) { /* not JSON */ }
 
   if (!res.ok) {
+    // A token was sent but refused: the admin is no longer logged in.
+    if (res.status === 401 && authToken && api.onUnauthorized) api.onUnauthorized();
     const err = new Error((data && data.error) || 'Request failed (' + res.status + ').');
     err.status = res.status;
     throw err;
@@ -48,6 +58,8 @@ const api = {
   put: (path, body) => request('PUT', path, body || {}),
   patch: (path, body) => request('PATCH', path, body || {}),
   del: path => request('DELETE', path),
+  setToken: token => { authToken = token || null; },
+  onUnauthorized: null,
 };
 
 // ---------- small display helpers used by both pages ----------
