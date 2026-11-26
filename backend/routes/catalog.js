@@ -19,6 +19,20 @@ router.get('/sellers', async (req, res) => {
   res.json(await query('SELECT SellerID, StoreName, Rating FROM Seller ORDER BY StoreName'));
 });
 
+// GET /api/bestsellers
+// Units sold per product (cancelled orders left out), for the shop's "Most ordered"
+// section. Public, unlike the admin reports, because it shows no money or customers.
+router.get('/bestsellers', async (req, res) => {
+  res.json(await query(
+    `SELECT v.ProductID, SUM(oi.Quantity) AS UnitsSold
+     FROM OrderItem oi
+     JOIN [Order] o        ON oi.OrderID = o.OrderID
+     JOIN ProductVariant v ON oi.VariantID = v.VariantID
+     WHERE o.Status <> 'Cancelled'
+     GROUP BY v.ProductID
+     ORDER BY UnitsSold DESC`));
+});
+
 // GET /api/products?search=laptop&categoryId=1
 // Browse or search the catalog (uses the view vw_ProductCatalog).
 // categoryId also matches that category's subcategories.
