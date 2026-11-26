@@ -1,6 +1,6 @@
 -- ShopSphere: E-Commerce Shopping Store Database
 -- Schema (DDL) -- SQL Server (T-SQL)
--- All 16 tables (normalized to BCNF, in dependency order), their indexes,
+-- All 17 tables (normalized to BCNF, in dependency order), their indexes,
 -- sample data, and the Phase 3 views and stored procedures.
 -- Running this file drops and recreates the whole shopsphere database.
 -- STOP THE API FIRST (Ctrl+C in its terminal): a program still connected
@@ -48,6 +48,17 @@ CREATE TABLE Seller (
     StoreName NVARCHAR(150) NOT NULL,
     Email NVARCHAR(150) NOT NULL UNIQUE,
     Rating DECIMAL(3,2) DEFAULT 0
+);
+
+-- Shop staff who use the admin pages (orders, stock, reports). A separate table
+-- from Customer: admins do not shop (no cart, orders or addresses), and nobody
+-- can sign up as one - admin accounts are added here by the shop.
+CREATE TABLE Admin (
+    AdminID INT IDENTITY(1,1) PRIMARY KEY,
+    Name NVARCHAR(100) NOT NULL,
+    Email NVARCHAR(150) NOT NULL UNIQUE,
+    Password NVARCHAR(255) NOT NULL,
+    CreatedAt DATETIME2 DEFAULT GETDATE()
 );
 
 CREATE TABLE Category (
@@ -273,6 +284,10 @@ INSERT INTO Seller (StoreName, Email, Rating) VALUES
 ('StyleNest Fashion', 'contact@stylenest.example.com', 4.10),
 ('HomeEase Essentials', 'contact@homeease.example.com', 4.50),
 ('GlowHouse Beauty', 'contact@glowhouse.example.com', 4.40);
+
+-- ===== Admins (log in on admin.html) =====
+INSERT INTO Admin (Name, Email, Password) VALUES
+('Shop Admin', 'admin@example.com', 'admin_pw_001');
 
 -- ===== Categories (top-level first, then subcategories) =====
 INSERT INTO Category (Name, ParentCategoryID) VALUES
