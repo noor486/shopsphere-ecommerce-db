@@ -14,7 +14,7 @@ app.use(express.json());
 // call this API from the browser.
 app.use((req, res, next) => {
   res.set('Access-Control-Allow-Origin', '*');
-  res.set('Access-Control-Allow-Headers', 'Content-Type');
+  res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');   // Authorization carries the admin token
   res.set('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
   if (req.method === 'OPTIONS') return res.sendStatus(204);
   next();
@@ -34,7 +34,7 @@ app.get('/api', (req, res) => {
       '/api/products?search=laptop',
       '/api/products/1',
       '/api/customers/1/orders',
-      '/api/admin/reports/top-products',
+      '/api/bestsellers',
     ],
   });
 });
