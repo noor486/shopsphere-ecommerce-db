@@ -21,6 +21,12 @@ h1,h2,h3{font-family:var(--display);line-height:1.15;margin:0}
 .burger:hover{background:rgba(255,255,255,.12)}
 .logo{flex:1 1 auto;min-width:0;text-align:left;background:none;border:0;color:#fff;font:800 24px var(--display);letter-spacing:-.02em;padding:0 4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .top-right{flex:none;display:flex;align-items:center;gap:10px}
+.admin-link{color:#CFE0DE;font-weight:600;font-size:15px;text-decoration:none;padding:6px 12px;border:1px solid #4A6F75;border-radius:999px;white-space:nowrap}
+.admin-link:hover{color:#fff;border-color:#fff}
+@media (max-width:400px){
+  .top-right{gap:6px}
+  .admin-link{padding:4px 8px;font-size:13px}
+}
 .cart-btn{position:relative;display:grid;place-items:center;width:42px;height:42px;border-radius:50%;border:0;background:var(--saffron);color:var(--ink);padding:0}
 .cart-btn svg{fill:currentColor}
 .cart-btn .pill{position:absolute;top:-5px;right:-5px;min-width:20px;height:20px;padding:0 5px;border-radius:999px;border:2px solid var(--ink);background:#fff;color:var(--ink);font-size:12px;font-weight:700;line-height:16px;text-align:center}
