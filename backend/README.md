@@ -38,7 +38,7 @@ Request and response bodies are JSON. Errors come back as `{ "error": "message" 
 | Status | Meaning |
 |---|---|
 | 400 | Bad input, or a business rule was broken (e.g. not enough stock) |
-| 401 | Wrong email or password |
+| 401 | Wrong email or password, or an admin request without a valid admin token |
 | 404 | Not found |
 | 409 | Duplicate (e.g. email already registered, product already reviewed) |
 
@@ -50,6 +50,7 @@ Request and response bodies are JSON. Errors come back as `{ "error": "message" 
 | GET | `/api/products?search=&categoryId=` | | Browse or search products (**vw_ProductCatalog**). `categoryId` includes its subcategories |
 | GET | `/api/products/:id` | | One product with variants, images and reviews (each review has the reviewer's `CustomerID`) |
 | GET | `/api/sellers` | | All sellers with their rating |
+| GET | `/api/bestsellers` | | Units sold per product, for the shop's "Most ordered" (no money or customer data, so it is public) |
 | POST | `/api/products/:id/reviews` | `customerId, rating, comment` | Review a product (only after a delivered order, once per customer) |
 
 ### Customers
@@ -86,8 +87,19 @@ Request and response bodies are JSON. Errors come back as `{ "error": "message" 
 
 ### Admin
 
+Every admin endpoint except `login` needs an admin token. Log in first, then send the token in a header with each request:
+
+```
+Authorization: Bearer <token>
+```
+
+Without a valid token the API answers **401** and changes nothing. Tokens last 8 hours and are kept in the API's memory, so restarting the API logs admins out. The sample admin is `admin@example.com` with password `admin_pw_001` (the `Admin` table; customers cannot log in here).
+
 | Method | URL | Body | What it does |
 |---|---|---|---|
+| POST | `/api/admin/login` | `email, password` | Log in as an admin; returns `{ token, admin }`. The password must match exactly |
+| GET | `/api/admin/me` | | The admin the token belongs to |
+| POST | `/api/admin/logout` | | Forget the token |
 | GET | `/api/admin/orders?status=` | | Every order (**vw_OrderSummary**), newest first, with its latest `PaymentID`. `status` (e.g. `Pending`) is optional |
 | POST | `/api/admin/products` | `name, description, categoryId, sellerId, basePrice` | Add a product |
 | POST | `/api/admin/products/:id/variants` | `sku, size, color, price, stockQty` | Add a size/colour variant |
@@ -107,7 +119,13 @@ $api = "http://localhost:3000/api"
 # Rehan (customer 13) adds 2 yoga mats (variant 23) to the cart
 Invoke-RestMethod -Method Post "$api/customers/13/cart" -ContentType "application/json" -Body '{"variantId":23,"quantity":2}'
 # Check out to his saved address (13) with a coupon
-Invoke-RestMethod -Method Post "$api/customers/13/orders" -ContentType "application/json" -Body '{"addressId":13,"paymentMethod":"JazzCash","couponCode":"SAVE10"}'
+$order = Invoke-RestMethod -Method Post "$api/customers/13/orders" -ContentType "application/json" -Body '{"addressId":13,"paymentMethod":"JazzCash","couponCode":"SAVE10"}'
+
+# The admin logs in, finds the order's payment and marks it as paid
+$login = Invoke-RestMethod -Method Post "$api/admin/login" -ContentType "application/json" -Body '{"email":"admin@example.com","password":"admin_pw_001"}'
+$auth = @{ Authorization = "Bearer " + $login.token }
+$row = (Invoke-RestMethod "$api/admin/orders?status=Pending" -Headers $auth) | Where-Object OrderID -eq $order.OrderID
+Invoke-RestMethod -Method Patch "$api/admin/payments/$($row.PaymentID)" -Headers $auth -ContentType "application/json" -Body '{"status":"Completed"}'
 ```
 
 ## Transactions
@@ -125,4 +143,4 @@ Requests that change only one row or table (register, add an address, restock, w
 
 ## Not done yet (on purpose)
 
-- **No login tokens or password hashing.** Customer IDs come from the URL, and the `/api/admin` endpoints and the admin pages have no login. The proposal lists production-grade auth as out of scope.
+- **No password hashing, and simple tokens.** Passwords are stored as plain text. Admins get a random token kept in the API's memory, not a signed one (such as a JWT). Customers get no token at all: their ID comes from the URL. The proposal lists production-grade security as out of scope.
