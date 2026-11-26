@@ -1,6 +1,6 @@
 # ShopSphere API
 
-REST API for the ShopSphere database, built with Node.js, Express and SQL Server (the proposal's application tier).
+REST API for the ShopSphere database, built with Node.js, Express and SQL Server (the proposal's application tier). It also serves the web pages in the `frontend/` folder, so the shop, the admin pages and the API all run from one `npm start`.
 
 ## Run it
 
@@ -14,7 +14,14 @@ REST API for the ShopSphere database, built with Node.js, Express and SQL Server
    npm start
    ```
 
-3. Open <http://localhost:3000/api/health>. It should show the database name and the number of products.
+3. Open it in a browser:
+
+   | URL | What opens |
+   |---|---|
+   | <http://localhost:3000> | The shop (`frontend/index.html`) |
+   | <http://localhost:3000/admin.html> | The admin pages: orders, products and stock, reports (`frontend/admin.html`) |
+   | <http://localhost:3000/api/health> | A quick check: the database name and the number of products |
+   | <http://localhost:3000/api> | A short list of API URLs to try |
 
 The API logs in to SQL Server with your Windows account. The default server is `.\SQLEXPRESS` and the default database is `shopsphere`. To use different ones, set environment variables before `npm start` (PowerShell):
 
@@ -41,7 +48,8 @@ Request and response bodies are JSON. Errors come back as `{ "error": "message" 
 |---|---|---|---|
 | GET | `/api/categories` | | All categories (top-level ones have no parent) |
 | GET | `/api/products?search=&categoryId=` | | Browse or search products (**vw_ProductCatalog**). `categoryId` includes its subcategories |
-| GET | `/api/products/:id` | | One product with variants, images and reviews |
+| GET | `/api/products/:id` | | One product with variants, images and reviews (each review has the reviewer's `CustomerID`) |
+| GET | `/api/sellers` | | All sellers with their rating |
 | POST | `/api/products/:id/reviews` | `customerId, rating, comment` | Review a product (only after a delivered order, once per customer) |
 
 ### Customers
@@ -49,7 +57,7 @@ Request and response bodies are JSON. Errors come back as `{ "error": "message" 
 | Method | URL | Body | What it does |
 |---|---|---|---|
 | POST | `/api/customers/register` | `name, email, password, phone` | Create an account |
-| POST | `/api/customers/login` | `email, password` | Log in, returns the customer |
+| POST | `/api/customers/login` | `email, password` | Log in, returns the customer. The email ignores capital letters; the password must match exactly (`COLLATE Latin1_General_CS_AS`) |
 | GET | `/api/customers/:id` | | Profile (the password is never returned) |
 | GET | `/api/customers/:id/addresses` | | Saved addresses |
 | POST | `/api/customers/:id/addresses` | `line1, city, postalCode, country, addressType` | Add an address (`Shipping` or `Billing`) |
@@ -80,6 +88,7 @@ Request and response bodies are JSON. Errors come back as `{ "error": "message" 
 
 | Method | URL | Body | What it does |
 |---|---|---|---|
+| GET | `/api/admin/orders?status=` | | Every order (**vw_OrderSummary**), newest first, with its latest `PaymentID`. `status` (e.g. `Pending`) is optional |
 | POST | `/api/admin/products` | `name, description, categoryId, sellerId, basePrice` | Add a product |
 | POST | `/api/admin/products/:id/variants` | `sku, size, color, price, stockQty` | Add a size/colour variant |
 | PATCH | `/api/admin/variants/:id/stock` | `change` | Restock (`25`) or correct (`-3`) stock |
@@ -116,4 +125,4 @@ Requests that change only one row or table (register, add an address, restock, w
 
 ## Not done yet (on purpose)
 
-- **No login tokens or password hashing.** Customer IDs come from the URL. The proposal lists production-grade auth as out of scope.
+- **No login tokens or password hashing.** Customer IDs come from the URL, and the `/api/admin` endpoints and the admin pages have no login. The proposal lists production-grade auth as out of scope.
