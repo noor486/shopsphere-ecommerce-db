@@ -25,11 +25,16 @@ router.post('/customers/register', async (req, res) => {
 });
 
 // POST /api/customers/login   body: { email, password }
+// The database compares text without caring about capital letters (its collation is
+// SQL_Latin1_General_CP1_CI_AS, CI = case-insensitive). That is right for the email,
+// but a password must match exactly, so the password comparison uses a case-sensitive
+// collation (CS = case-sensitive): "Secret1" no longer matches "secret1".
 router.post('/customers/login', async (req, res) => {
   requireFields(req.body, ['email', 'password']);
 
   const [customer] = await query(
-    `SELECT ${PUBLIC_COLUMNS} FROM Customer WHERE Email = @email AND Password = @password`,
+    `SELECT ${PUBLIC_COLUMNS} FROM Customer
+     WHERE Email = @email AND Password = @password COLLATE Latin1_General_CS_AS`,
     { email: req.body.email, password: req.body.password });
 
   if (!customer) throw new HttpError(401, 'Wrong email or password.');
