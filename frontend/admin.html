@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ShopSphere Admin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=Source+Sans+3:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body class="admin">
+<header class="top">
+  <button class="logo" data-act="tab" data-tab="orders">ShopSphere <small>Admin</small></button>
+  <div class="top-right"><a class="shop-link" href="index.html">Back to the shop</a></div>
+</header>
+<nav class="tabs" aria-label="Admin sections">
+  <button class="tab" data-act="tab" data-tab="orders">Orders</button>
+  <button class="tab" data-act="tab" data-tab="products">Products and stock</button>
+  <button class="tab" data-act="tab" data-tab="reports">Reports</button>
+</nav>
+<main id="main"></main>
+<div id="toast" role="status" aria-live="polite"></div>
+<noscript>This page needs JavaScript.</noscript>
+
+<script src="api.js"></script>
+<script>
+/*
+  ShopSphere admin pages. Everything goes through the API (api.js) to SQL Server:
+      GET   /api/admin/orders                  every order, from the view vw_OrderSummary
+      GET   /api/orders/:id                    one order's items and payment attempts
+      PATCH /api/admin/payments/:id            Pending -> Completed (paid) or Failed
+      PATCH /api/admin/orders/:id/shipment     Shipped (carrier, tracking) or Delivered
+      POST  /api/orders/:id/cancel             cancel an order (one transaction in the API)
+  The payment and shipment updates also run in transactions in the API, so the order's
+  status always changes together with its payment or shipment.
+  There is no admin login: the proposal lists production-grade security as out of scope.
+  Step 6.1: orders. Products and stock (6.2) and reports (6.3) come next.
+*/
+(function () {
+'use strict';
+
+const $ = s => document.querySelector(s);
+const STATUSES = ['Pending', 'Processing', 'Shipped', 'Delivered', 'Cancelled'];
+const CARRIERS = ['TCS', 'Leopards', 'M&P', 'PostEx', 'Trax'];
+
+const state = {
+  tab: 'orders',
+  orders: [], loaded: false, loadError: '',
+  filter: '',                     // '' = all, or one order status
+  items: {},                      // OrderID -> GET /api/orders/:id result, while "Show items" is open
+  shipping: null,                 // the ship form: { orderId, carrier, tracking, error }
+  cancelAsk: null                 // OrderID whose "Are you sure?" is showing
+};
+
+// ---------- loading ----------
+async function loadOrders() {
+  try {
+    state.orders = await api.get('/admin/orders');
+    state.loaded = true; state.loadError = '';
+  } catch (e) { state.loadError = e.message; }
+  render();
+}
+async function loadItems(orderId) {
+  try { state.items[orderId] = await api.get('/orders/' + orderId); }
+  catch (e) { delete state.items[orderId]; toast(e.message); }
+  render();
+}
+
+// ---------- orders tab ----------
+const chip = s => '<span class="chip s-' + esc(s) + '">' + esc(s) + '</span>';
+
+// Which buttons an order gets, following the proposal's workflow:
+//   payment: Pending -> Completed (paid) or Failed
+//   order:   Pending -> Processing (when paid) -> Shipped -> Delivered, or Cancelled before shipping
+// An order ships once it is paid, or straight away when the customer pays cash on delivery.
+function actionsFor(o) {
+  const out = [];
+  const open = o.OrderStatus === 'Pending' || o.OrderStatus === 'Processing';
+  if (o.PaymentStatus === 'Pending' && o.OrderStatus !== 'Cancelled') {
+    out.push('<button class="btn primary" data-act="pay" data-id="' + o.PaymentID + '" data-status="Completed">Mark paid</button>');
+    out.push('<button class="btn" data-act="pay" data-id="' + o.PaymentID + '" data-status="Failed">Payment failed</button>');
+  }
+  const paidOrCod = o.PaymentStatus === 'Completed' || (o.PaymentMethod === 'Cash on Delivery' && o.PaymentStatus === 'Pending');
+  if (open && paidOrCod) out.push('<button class="btn" data-act="ship-open" data-id="' + o.OrderID + '">Ship…</button>');
+  if (open && !paidOrCod) out.push('<span class="muted">Ships once paid</span>');
+  if (o.OrderStatus === 'Shipped') out.push('<button class="btn primary" data-act="deliver" data-id="' + o.OrderID + '">Mark delivered</button>');
+  if (open) out.push('<button class="btn danger" data-act="cancel-ask" data-id="' + o.OrderID + '">Cancel order</button>');
+  out.push('<button class="link" data-act="items" data-id="' + o.OrderID + '">' + (state.items[o.OrderID] ? 'Hide items' : 'Show items') + '</button>');
+  return out.join('');
+}
+
+function shipForm(o) {
+  const f = state.shipping;
+  return '<div class="ship-form">' +
+    '<div class="field"><label for="carrier"><span>Carrier</span></label><select id="carrier" data-bind="carrier">' +
+      CARRIERS.map(c => '<option' + (f.carrier === c ? ' selected' : '') + '>' + esc(c) + '</option>').join('') + '</select></div>' +
+    '<div class="field"><label for="tracking"><span>Tracking number</span></label><input id="tracking" data-bind="tracking" value="' + esc(f.tracking) + '" placeholder="e.g. TRK-' + o.OrderID + '"></div>' +
+    '<button class="btn primary" data-act="ship" data-id="' + o.OrderID + '">Mark shipped</button>' +
+    '<button class="btn" data-act="ship-close">Back</button>' +
+    (f.error ? '<p class="err" style="flex-basis:100%">' + esc(f.error) + '</p>' : '') +
+  '</div>';
+}
+
+function itemsTable(d) {
+  return '<table><thead><tr><th>Item</th><th class="r">Qty</th><th class="r">Price</th><th class="r">Total</th></tr></thead><tbody>' +
+    d.items.map(i => '<tr><td>' + esc(i.ProductName) + ' <span class="muted">(' + esc(i.SKU) + ')</span></td><td class="r">' + i.Quantity + '</td><td class="r">' + money(i.UnitPrice) + '</td><td class="r">' + money(i.LineTotal) + '</td></tr>').join('') +
+    '</tbody></table>' +
+    (d.payments.length > 1 ? '<p class="arow-meta">Payment attempts: ' + d.payments.map(p => esc(p.Method) + ' ' + chip(p.Status)).join(', ') + '</p>' : '');
+}
+
+function orderRow(o) {
+  const asking = state.cancelAsk === o.OrderID;
+  const shipping = state.shipping && state.shipping.orderId === o.OrderID;
+  return '<section class="arow">' +
+    '<div class="arow-head"><h2>Order ' + o.OrderID + '</h2><span class="muted">' + fmtDate(o.OrderDate) + '</span>' + chip(o.OrderStatus) +
+      '<span class="total">' + money(o.TotalAmount) + '</span></div>' +
+    '<p class="arow-meta">' + esc(o.CustomerName) + ' (' + esc(o.CustomerEmail) + ') · ' + o.ItemCount + ' item' + (o.ItemCount === 1 ? '' : 's') +
+      (o.CouponCode ? ' · coupon ' + esc(o.CouponCode) + ' (−' + money(o.Discount) + ')' : '') + (o.ShipToCity ? ' · to ' + esc(o.ShipToCity) : '') + '</p>' +
+    '<div class="arow-status"><span>Payment: ' + esc(o.PaymentMethod || '—') + ' ' + (o.PaymentStatus ? chip(o.PaymentStatus) : '') + '</span>' +
+      '<span>Shipment: ' + (o.ShipmentStatus ? chip(o.ShipmentStatus) : '—') + (o.Carrier ? ' ' + esc(o.Carrier) + (o.TrackingNumber ? ', ' + esc(o.TrackingNumber) : '') : '') + '</span></div>' +
+    (state.items[o.OrderID] ? itemsTable(state.items[o.OrderID]) : '') +
+    (asking ?
+      '<div class="actions"><span>Cancel order ' + o.OrderID + '? Stock goes back and a completed payment is refunded.</span>' +
+        '<button class="btn danger" data-act="cancel-yes" data-id="' + o.OrderID + '">Yes, cancel it</button><button class="btn" data-act="cancel-no">Keep the order</button></div>' :
+      shipping ? shipForm(o) : '<div class="actions">' + actionsFor(o) + '</div>') +
+  '</section>';
+}
+
+function ordersTab() {
+  if (state.loadError) return '<div class="empty"><h2>Orders could not load</h2><p>' + esc(state.loadError) + '</p><button class="btn primary" data-act="retry">Try again</button></div>';
+  if (!state.loaded) return '<p class="loading">Loading orders…</p>';
+  const count = s => state.orders.filter(o => o.OrderStatus === s).length;
+  const list = state.filter ? state.orders.filter(o => o.OrderStatus === state.filter) : state.orders;
+  return '<div class="shop-head"><h1>Orders</h1></div>' +
+    '<p class="admin-note">Every order in the database, newest first. Each change here is saved in SQL Server straight away. There is no admin login: production-grade security is out of scope in the proposal.</p>' +
+    '<div class="filters-bar" role="group" aria-label="Show orders">' +
+      '<button class="filter" data-act="filter" data-status="" aria-pressed="' + (!state.filter) + '">All<span>' + state.orders.length + '</span></button>' +
+      STATUSES.map(s => '<button class="filter" data-act="filter" data-status="' + s + '" aria-pressed="' + (state.filter === s) + '">' + s + '<span>' + count(s) + '</span></button>').join('') +
+    '</div>' +
+    (list.length ? list.map(orderRow).join('') : '<p class="muted">No ' + esc(state.filter.toLowerCase()) + ' orders.</p>');
+}
+
+// ---------- drawing ----------
+function render() {
+  document.querySelectorAll('.tab').forEach(b => b.setAttribute('aria-current', b.dataset.tab === state.tab ? 'page' : 'false'));
+  const tabs = {
+    orders: ordersTab,
+    products: () => '<div class="empty"><h2>Products and stock</h2><p>Adding products, variants and stock comes in step 6.2.</p></div>',
+    reports: () => '<div class="empty"><h2>Reports</h2><p>The sales reports come in step 6.3.</p></div>'
+  };
+  $('#main').innerHTML = tabs[state.tab]();
+}
+let toastTimer;
+function toast(msg) {
+  const t = $('#toast'); t.textContent = msg; t.classList.add('show');
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 2800);
+}
+
+// ---------- actions ----------
+// After every change: load the orders again, and the open item lists too.
+async function reload() {
+  await loadOrders();
+  await Promise.all(Object.keys(state.items).map(id => loadItems(Number(id))));
+}
+// PATCH /api/admin/payments/:id. Completing a payment also moves a Pending order to Processing.
+async function setPayment(paymentId, status) {
+  await api.patch('/admin/payments/' + paymentId, { status: status });
+  toast(status === 'Completed' ? 'Payment marked as paid' : 'Payment marked as failed');
+  await reload();
+}
+// PATCH /api/admin/orders/:id/shipment. The order's status follows the shipment's.
+async function ship(orderId) {
+  const f = state.shipping;
+  if (!f.tracking.trim()) { f.error = 'Enter the tracking number.'; render(); return; }
+  try {
+    await api.patch('/admin/orders/' + orderId + '/shipment', { status: 'Shipped', carrier: f.carrier, trackingNumber: f.tracking.trim() });
+  } catch (e) { f.error = e.message; render(); return; }
+  state.shipping = null; toast('Order ' + orderId + ' shipped');
+  await reload();
+}
+async function deliver(orderId) {
+  await api.patch('/admin/orders/' + orderId + '/shipment', { status: 'Delivered' });
+  toast('Order ' + orderId + ' delivered');
+  await reload();
+}
+async function cancel(orderId) {
+  state.cancelAsk = null;
+  await api.post('/orders/' + orderId + '/cancel');
+  toast('Order ' + orderId + ' cancelled');
+  await reload();
+}
+
+// Runs one action at a time, so a double click cannot send the same change twice.
+let busy = false;
+async function once(fn) {
+  if (busy) return;
+  busy = true;
+  try { await fn(); } catch (e) { toast(e.message); await loadOrders(); } finally { busy = false; }
+}
+
+// ---------- events ----------
+document.addEventListener('click', e => {
+  const el = e.target.closest('[data-act]');
+  if (!el) return;
+  const id = Number(el.dataset.id);
+  switch (el.dataset.act) {
+    case 'tab': state.tab = el.dataset.tab; render(); window.scrollTo(0, 0); break;
+    case 'retry': state.loadError = ''; render(); loadOrders(); break;
+    case 'filter': state.filter = el.dataset.status; state.shipping = null; state.cancelAsk = null; render(); break;
+    case 'items': if (state.items[id]) { delete state.items[id]; render(); } else loadItems(id); break;
+    case 'pay': once(() => setPayment(id, el.dataset.status)); break;
+    case 'ship-open': state.cancelAsk = null; state.shipping = { orderId: id, carrier: CARRIERS[0], tracking: '', error: '' }; render(); $('#tracking').focus(); break;
+    case 'ship-close': state.shipping = null; render(); break;
+    case 'ship': once(() => ship(id)); break;
+    case 'deliver': once(() => deliver(id)); break;
+    case 'cancel-ask': state.shipping = null; state.cancelAsk = id; render(); break;
+    case 'cancel-no': state.cancelAsk = null; render(); break;
+    case 'cancel-yes': once(() => cancel(id)); break;
+  }
+});
+// The ship form's boxes: keep state.shipping in step with what is typed or chosen.
+function bind(e) {
+  if (!state.shipping || !e.target.dataset.bind) return;
+  state.shipping[e.target.dataset.bind] = e.target.value;
+  if (state.shipping.error) { state.shipping.error = ''; const err = $('.ship-form .err'); if (err) err.remove(); }   // typing hides the old message
+}
+document.addEventListener('input', bind);
+document.addEventListener('change', bind);
+document.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.id === 'tracking') { e.preventDefault(); once(() => ship(state.shipping.orderId)); } });
+
+render();
+loadOrders();
+})();
+</script>
+</body>
+</html>
