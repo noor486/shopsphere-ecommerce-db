@@ -229,8 +229,8 @@ GO
 -- constraint (e.g. ProductVariant.SKU, Cart.CustomerID, CartItem.CartID,
 -- OrderItem.OrderID, Review.CustomerID, Shipment.OrderID) are indexed
 -- automatically and are not repeated here.
-CREATE INDEX IX_Address_Customer     ON Address(CustomerID);   --sp_PlaceOrder uses this index to get the shipping address of a customer.
-CREATE INDEX IX_Category_Parent      ON Category(ParentCategoryID);   --find subcategories ofa category.
+CREATE INDEX IX_Address_Customer     ON Address(CustomerID);   --lists a customer's saved addresses (profile page, checkout).
+CREATE INDEX IX_Category_Parent      ON Category(ParentCategoryID);   --find subcategories of a category.
 CREATE INDEX IX_Product_Category     ON Product(CategoryID);
 CREATE INDEX IX_Product_Seller       ON Product(SellerID);
 CREATE INDEX IX_Product_Name         ON Product(Name);
@@ -243,7 +243,7 @@ CREATE INDEX IX_Order_Customer       ON [Order](CustomerID);
 CREATE INDEX IX_Order_Coupon         ON [Order](CouponID);
 CREATE INDEX IX_Order_Date           ON [Order](OrderDate);
 CREATE INDEX IX_OrderItem_Variant    ON OrderItem(VariantID);
-CREATE INDEX IX_Payment_Order        ON Payment(OrderID);    --vw_OrderSummary uses this index to get the total paid for an order.
+CREATE INDEX IX_Payment_Order        ON Payment(OrderID);    --vw_OrderSummary uses this index to find an order's latest payment (MAX(PaymentID)).
 CREATE INDEX IX_Shipment_Address     ON Shipment(AddressID);
 GO
 
