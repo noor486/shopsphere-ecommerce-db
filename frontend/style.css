@@ -285,6 +285,61 @@ body.admin{padding-bottom:32px}
 .stock-change input{width:80px;border:1px solid var(--line);border-radius:8px;padding:5px 8px}
 .stock-change .btn{padding:5px 10px}
 .ptable .sub{display:none;font-size:13px;color:var(--ink-soft);font-weight:400}
+
+/* ----- reports ----- */
+/* One series per chart, so one bar colour: a teal from the shop's family, checked with the
+   palette validator (lightness band, chroma floor, 3:1 contrast on white). */
+:root{--bar:#0089A3;--bar-hover:#33A1B5;--grid:#E4EBEA}
+.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:0 0 18px}
+.kpi{background:#fff;border:1px solid var(--line);border-radius:10px;padding:14px 16px}
+.kpi span{display:block;color:var(--ink-soft);font-size:14px}
+.kpi b{display:block;font:600 28px/1.2 var(--body);margin-top:2px}
+.report-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.report{background:#fff;border:1px solid var(--line);border-radius:10px;padding:16px 18px;min-width:0}
+.report.wide{grid-column:1/-1}
+.report-head{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:6px 12px;margin-bottom:10px}
+.report-head h2{font-size:19px}
+.report-head p{margin:2px 0 0;color:var(--ink-soft);font-size:14px}
+/* ranked bars: name, bar, figure per row; the bar drops under the name where narrow */
+.rank{list-style:none;margin:0;padding:0;display:grid;gap:2px}
+.rank li{display:grid;grid-template-columns:minmax(0,40%) 1fr auto;align-items:center;gap:4px 12px;padding:5px 6px;border-radius:6px}
+.rank li:hover,.rank li:focus-visible{background:var(--paper)}
+.rank .name{overflow-wrap:anywhere;font-size:15px}
+.rank .name small{display:block;color:var(--ink-soft);font-size:13px}
+.rank .track{height:12px}
+.rank .fill{display:block;height:12px;min-width:2px;background:var(--bar);border-radius:0 4px 4px 0}
+.rank li:hover .fill,.rank li:focus-visible .fill{background:var(--bar-hover)}
+.rank .val{font-variant-numeric:tabular-nums;font-weight:600;font-size:15px;text-align:right;white-space:nowrap}
+/* columns: revenue per month */
+.cols{position:relative;height:220px;margin:8px 0 0 64px}
+.cols .gl{position:absolute;left:0;right:0;border-top:1px solid var(--grid)}
+.cols .gl.base{border-top-color:#C9D6D3}
+.cols .gl span{position:absolute;right:calc(100% + 8px);top:-9px;font-size:12px;color:var(--ink-soft);white-space:nowrap;font-variant-numeric:tabular-nums}
+.cols .bars{position:absolute;inset:0;display:flex;align-items:flex-end;justify-content:space-around}
+.cols .col{position:relative;flex:1;display:flex;justify-content:center;align-items:flex-end;height:100%;outline-offset:-2px}
+.cols .col i{display:block;width:24px;max-width:70%;background:var(--bar);border-radius:4px 4px 0 0;min-height:2px}
+.cols .col:hover i,.cols .col:focus-visible i{background:var(--bar-hover)}
+.cols .col em{position:absolute;font-style:normal;font-size:12px;font-weight:600;white-space:nowrap;padding-bottom:4px}
+.cols-x{display:flex;justify-content:space-around;margin:6px 0 0 64px;font-size:12px;color:var(--ink-soft)}
+.cols-x span{flex:1;text-align:center}
+.report table.data{width:100%;border-collapse:collapse;font-size:15px;margin-top:6px}
+.report table.data th{text-align:left;font-weight:600;color:var(--ink-soft);font-size:14px;padding:6px 8px 6px 0;border-bottom:1px solid var(--line)}
+.report table.data td{padding:6px 8px 6px 0;border-top:1px solid var(--line);font-variant-numeric:tabular-nums}
+.report table.data .r{text-align:right}
+.threshold{display:flex;align-items:center;gap:8px;font-size:15px}
+.threshold input{width:70px;border:1px solid var(--line);border-radius:8px;padding:5px 8px}
+#tip{position:fixed;z-index:70;pointer-events:none;background:#fff;color:var(--ink);border:1px solid var(--line);border-radius:8px;box-shadow:0 6px 18px rgba(18,52,59,.18);padding:6px 10px;font-size:14px;display:none;max-width:260px}
+#tip b{display:block;font-size:16px}
+#tip span{color:var(--ink-soft)}
+@media (max-width:900px){.report-grid{grid-template-columns:1fr}}
+@media (max-width:640px){
+  .kpis{grid-template-columns:1fr 1fr}
+  .kpi b{font-size:22px}
+  .rank li{grid-template-columns:1fr auto}
+  .rank .track{grid-column:1/-1;grid-row:2}
+  .cols{margin-left:52px;height:180px}
+  .cols-x{margin-left:52px}
+}
 @media (max-width:640px){
   .ptable .c-cat,.ptable .c-seller,.ptable .c-var{display:none}
   .ptable .sub{display:block}
