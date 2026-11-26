@@ -265,3 +265,35 @@ body.admin{padding-bottom:32px}
 .arow th{text-align:left;font-weight:600;color:var(--ink-soft);font-size:14px;padding:4px 6px 4px 0}
 .arow td{padding:6px 6px 6px 0;border-top:1px solid var(--line)}
 .arow td.r,.arow th.r{text-align:right}
+.toolbar-admin{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin:0 0 14px}
+.toolbar-admin input{flex:1 1 220px;max-width:360px;border:1px solid var(--line);border-radius:8px;padding:8px 12px;background:#fff}
+.form-card{background:#fff;border:1px solid var(--line);border-radius:10px;padding:16px;margin:0 0 16px}
+.form-card h2{font-size:20px;margin-bottom:4px}
+.form-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:0 14px}
+.form-grid .wide{grid-column:1/-1}
+.table-wrap{overflow-x:auto;background:#fff;border:1px solid var(--line);border-radius:10px}
+.ptable{width:100%;border-collapse:collapse;font-size:15px}
+.ptable th{text-align:left;font-weight:600;color:var(--ink-soft);font-size:14px;padding:10px 12px;border-bottom:1px solid var(--line);white-space:nowrap}
+.ptable td{padding:9px 12px;border-top:1px solid var(--line);vertical-align:top}
+.ptable .r{text-align:right}
+.ptable .low{color:var(--danger);font-weight:600}
+.ptable tr.open > td{background:var(--paper)}
+.ptable .panel > td{background:var(--paper);padding:4px 12px 16px}
+.ptable .panel table{width:100%;border-collapse:collapse;background:#fff;border:1px solid var(--line);border-radius:8px;margin:6px 0 12px}
+.ptable .panel th,.ptable .panel td{padding:7px 10px;border-top:1px solid var(--line);background:#fff}
+.stock-change{display:flex;gap:6px;align-items:center}
+.stock-change input{width:80px;border:1px solid var(--line);border-radius:8px;padding:5px 8px}
+.stock-change .btn{padding:5px 10px}
+.ptable .sub{display:none;font-size:13px;color:var(--ink-soft);font-weight:400}
+@media (max-width:640px){
+  .ptable .c-cat,.ptable .c-seller,.ptable .c-var{display:none}
+  .ptable .sub{display:block}
+  .ptable th,.ptable td{padding:8px}
+  /* an open product's variants: one small block per variant instead of a wide table */
+  .ptable .panel table thead{display:none}
+  .ptable .panel table,.ptable .panel table tbody,.ptable .panel table tr,.ptable .panel table td{display:block;width:auto}
+  .ptable .panel table tr{border-top:1px solid var(--line);padding:6px 0}
+  .ptable .panel table tr:first-child{border-top:0}
+  .ptable .panel table td{border:0;padding:2px 10px;text-align:left}
+  .ptable .panel table td[data-label]::before{content:attr(data-label) ": ";color:var(--ink-soft)}
+}
