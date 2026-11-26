@@ -1,11 +1,63 @@
 // Administrator: manage products and stock, move orders through payment
-// and shipping, and view sales reports. (No login check yet: auth is out
-// of scope in the proposal.)
+// and shipping, and view sales reports.
+//
+// Every /api/admin request except /login needs an admin token:
+//   1. POST /api/admin/login with an admin's email and password (Admin table)
+//      answers with a token, a long random string.
+//   2. The admin page sends it with every request in a header:
+//      Authorization: Bearer <token>
+//   3. The check below lets the request through only with a known, unexpired
+//      token; otherwise it answers 401.
+// Tokens are kept in the API's memory, so restarting the API logs admins out.
+// (Passwords are not hashed: production-grade security is out of scope in the proposal.)
+const crypto = require('crypto');
 const express = require('express');
 const { query } = require('../db');
 const { HttpError, toId, toAmount, requireFields, found } = require('../helpers');
 
 const router = express.Router();
+
+// ===================== Logging in =====================
+
+const sessions = new Map();          // token -> { admin, expires }
+const SESSION_HOURS = 8;
+
+// POST /api/admin/login   body: { email, password }
+// The password must match exactly (case-sensitive), as for customers.
+router.post('/login', async (req, res) => {
+  requireFields(req.body, ['email', 'password']);
+  const [admin] = await query(
+    `SELECT AdminID, Name, Email FROM Admin
+     WHERE Email = @email AND Password = @password COLLATE Latin1_General_CS_AS`,
+    { email: req.body.email, password: req.body.password });
+  if (!admin) throw new HttpError(401, 'Wrong email or password.');
+
+  const token = crypto.randomBytes(32).toString('hex');   // 64 random hex characters
+  sessions.set(token, { admin: admin, expires: Date.now() + SESSION_HOURS * 60 * 60 * 1000 });
+  res.json({ token: token, admin: admin });
+});
+
+// The check: every route written below this line needs a valid token.
+router.use((req, res, next) => {
+  const match = /^Bearer ([0-9a-f]+)$/.exec(req.get('Authorization') || '');
+  const session = match && sessions.get(match[1]);
+  if (!session || session.expires < Date.now()) {
+    if (session) sessions.delete(match[1]);                 // expired: forget it
+    throw new HttpError(401, 'Log in as an admin first.');
+  }
+  req.admin = session.admin;
+  req.token = match[1];
+  next();
+});
+
+// GET /api/admin/me - who is logged in (the admin page asks after a refresh)
+router.get('/me', (req, res) => res.json(req.admin));
+
+// POST /api/admin/logout - forget this token
+router.post('/logout', (req, res) => {
+  sessions.delete(req.token);
+  res.status(204).end();
+});
 
 // ===================== Products and stock =====================
 
