@@ -12,9 +12,9 @@
 <body class="admin">
 <header class="top">
   <button class="logo" data-act="tab" data-tab="orders">ShopSphere <small>Admin</small></button>
-  <div class="top-right"><a class="shop-link" href="index.html">Back to the shop</a></div>
+  <div class="top-right"><div class="admin-user" id="admin-user"></div><a class="shop-link" href="index.html">Back to the shop</a></div>
 </header>
-<nav class="tabs" aria-label="Admin sections">
+<nav class="tabs" aria-label="Admin sections" hidden>
   <button class="tab" data-act="tab" data-tab="orders">Orders</button>
   <button class="tab" data-act="tab" data-tab="products">Products and stock</button>
   <button class="tab" data-act="tab" data-tab="reports">Reports</button>
@@ -26,7 +26,13 @@
 <script src="api.js"></script>
 <script>
 /*
-  ShopSphere admin pages. Everything goes through the API (api.js) to SQL Server:
+  ShopSphere admin pages. Everything goes through the API (api.js) to SQL Server.
+  First the admin logs in:
+      POST  /api/admin/login                   email + password (Admin table) -> a token
+      GET   /api/admin/me                      after a refresh: is the saved token still valid?
+      POST  /api/admin/logout                  forget the token
+  The token is kept in this browser tab (sessionStorage) and sent with every request
+  (api.setToken). Without it, every /api/admin request below is refused with 401.
       GET   /api/admin/orders                  every order, from the view vw_OrderSummary
       GET   /api/orders/:id                    one order's items and payment attempts
       PATCH /api/admin/payments/:id            Pending -> Completed (paid) or Failed
@@ -41,7 +47,7 @@
             top-products, customer-spending, monthly-revenue, category-performance, low-stock?threshold=
   The payment and shipment updates also run in transactions in the API, so the order's
   status always changes together with its payment or shipment.
-  There is no admin login: the proposal lists production-grade security as out of scope.
+  Passwords are not hashed: the proposal lists production-grade security as out of scope.
 */
 (function () {
 'use strict';
@@ -50,7 +56,13 @@ const $ = s => document.querySelector(s);
 const STATUSES = ['Pending', 'Processing', 'Shipped', 'Delivered', 'Cancelled'];
 const CARRIERS = ['TCS', 'Leopards', 'M&P', 'PostEx', 'Trax'];
 
+const TOKEN_KEY = 'shopsphere-admin-token';   // sessionStorage: forgotten when the tab closes
+
 const state = {
+  // logging in
+  checked: false,                 // has the page checked for a saved login yet?
+  admin: null,                    // the logged-in admin: { AdminID, Name, Email }
+  loginForm: { email: '', password: '', error: '', notice: '', busy: false },
   tab: 'orders',
   orders: [], loaded: false, loadError: '',
   filter: '',                     // '' = all, or one order status
@@ -148,7 +160,7 @@ function ordersTab() {
   const count = s => state.orders.filter(o => o.OrderStatus === s).length;
   const list = state.filter ? state.orders.filter(o => o.OrderStatus === state.filter) : state.orders;
   return '<div class="shop-head"><h1>Orders</h1></div>' +
-    '<p class="admin-note">Every order in the database, newest first. Each change here is saved in SQL Server straight away. There is no admin login: production-grade security is out of scope in the proposal.</p>' +
+    '<p class="admin-note">Every order in the database, newest first. Each change here is saved in SQL Server straight away.</p>' +
     '<div class="filters-bar" role="group" aria-label="Show orders">' +
       '<button class="filter" data-act="filter" data-status="" aria-pressed="' + (!state.filter) + '">All<span>' + state.orders.length + '</span></button>' +
       STATUSES.map(s => '<button class="filter" data-act="filter" data-status="' + s + '" aria-pressed="' + (state.filter === s) + '">' + s + '<span>' + count(s) + '</span></button>').join('') +
@@ -345,6 +357,19 @@ function reportsTab() {
 }
 const last = a => a[a.length - 1];
 
+// ---------- log-in screen ----------
+function loginView() {
+  const f = state.loginForm;
+  return '<section class="form-card login-card"><h1>Admin log in</h1>' +
+    '<p class="muted">For shop staff. Admin accounts are added by the shop in the Admin table; customers cannot sign up as admins.</p>' +
+    (f.notice ? '<p class="err">' + esc(f.notice) + '</p>' : '') +
+    field('al-email', 'Email', 'loginForm.email', f.email, 'email') +
+    field('al-pass', 'Password', 'loginForm.password', f.password, 'password') +
+    (f.error ? '<p class="err" id="al-err">' + esc(f.error) + '</p>' : '') +
+    '<button class="btn primary" style="width:100%;margin-top:6px" data-act="login"' + (f.busy ? ' disabled' : '') + '>' + (f.busy ? 'Logging in…' : 'Log in') + '</button>' +
+    '<p class="muted" style="margin-top:14px">Sample admin: <b>admin@example.com</b> with password <b>admin_pw_001</b>.</p></section>';
+}
+
 // ---------- drawing ----------
 function render() {
   // Redrawing replaces the boxes, so remember which one has the cursor and put it back.
@@ -357,7 +382,11 @@ function render() {
     reports: reportsTab
   };
   hideTip();
-  $('#main').innerHTML = tabs[state.tab]();
+  // Logged in: the admin's name and Log out in the header, the tabs, the open tab.
+  // Not logged in: only the log-in screen.
+  $('#admin-user').innerHTML = state.admin ? '<span class="who">' + esc(state.admin.Name) + '</span><button class="btn" data-act="logout">Log out</button>' : '';
+  $('.tabs').hidden = !state.admin;
+  $('#main').innerHTML = !state.checked ? '<p class="loading">Loading…</p>' : !state.admin ? loginView() : tabs[state.tab]();
   const el = focusId && document.getElementById(focusId);
   if (el) { el.focus(); if (caret != null) el.setSelectionRange(caret, caret); }
 }
@@ -489,6 +518,57 @@ async function addVariant(pid) {
   await refreshProducts();
 }
 
+// ---------- logging in and out ----------
+const newLogin = notice => ({ email: '', password: '', error: '', notice: notice || '', busy: false });
+function saveToken(token) {
+  api.setToken(token);
+  try { if (token) sessionStorage.setItem(TOKEN_KEY, token); else sessionStorage.removeItem(TOKEN_KEY); } catch (e) { /* private window */ }
+}
+// Forget everything loaded while logged in, so the next admin starts clean.
+function clearData() {
+  Object.assign(state, { tab: 'orders', orders: [], loaded: false, loadError: '', filter: '', items: {}, shipping: null, cancelAsk: null,
+    products: [], prodLoaded: false, prodError: '', prodQuery: '', addForm: null, manage: null, reports: null, repError: '' });
+}
+// POST /api/admin/login -> { token, admin }
+async function doLogin() {
+  const f = state.loginForm, email = f.email.trim();
+  if (!email || !f.password) { f.error = 'Enter your email and password.'; render(); return; }
+  f.busy = true; f.error = ''; f.notice = ''; render();
+  try {
+    const r = await api.post('/admin/login', { email: email, password: f.password });
+    saveToken(r.token);
+    state.admin = r.admin; state.loginForm = newLogin(); clearData();
+    render(); toast('Welcome, ' + r.admin.Name);
+    loadOrders();
+  } catch (e) {
+    f.busy = false; f.error = e.status === 401 ? 'The email or password is not right.' : e.message; render();
+  }
+}
+// POST /api/admin/logout, then forget the token here too.
+async function logout() {
+  try { await api.post('/admin/logout'); } catch (e) { /* already logged out on the API */ }
+  saveToken(null); state.admin = null; clearData(); state.loginForm = newLogin();
+  render(); toast('Logged out');
+}
+// The API refused the token (it expired, or the API was restarted): back to the log-in screen.
+api.onUnauthorized = () => {
+  saveToken(null); state.admin = null; clearData();
+  state.loginForm = newLogin('Your admin session has ended (the API was restarted or 8 hours passed). Please log in again.');
+  render();
+};
+// On opening the page: is there a saved token, and does the API still accept it?
+async function start() {
+  let saved = null;
+  try { saved = sessionStorage.getItem(TOKEN_KEY); } catch (e) { /* private window */ }
+  if (saved) {
+    api.setToken(saved);
+    try { state.admin = await api.get('/admin/me'); }
+    catch (e) { saveToken(null); state.loginForm = newLogin(); }   // no "session ended" note on a fresh open
+  }
+  state.checked = true; render();
+  if (state.admin) loadOrders();
+}
+
 // Runs one action at a time, so a double click cannot send the same change twice.
 let busy = false;
 async function once(fn) {
@@ -506,6 +586,7 @@ document.addEventListener('click', e => {
   const id = Number(el.dataset.id);
   switch (el.dataset.act) {
     case 'tab':
+      if (!state.admin) break;                  // logged out: only the log-in screen
       state.tab = el.dataset.tab; render(); window.scrollTo(0, 0);
       if (state.tab === 'products' && !state.prodLoaded) loadProducts();
       if (state.tab === 'reports') loadReports();
@@ -525,6 +606,9 @@ document.addEventListener('click', e => {
     case 'cancel-ask': state.shipping = null; state.cancelAsk = id; render(); break;
     case 'cancel-no': state.cancelAsk = null; render(); break;
     case 'cancel-yes': once(() => cancel(id)); break;
+    // logging in and out
+    case 'login': once(doLogin); break;
+    case 'logout': once(logout); break;
     // products tab
     case 'retry-products': state.prodError = ''; render(); loadProducts(); break;
     case 'add-open': state.addForm = { name: '', description: '', categoryId: '', sellerId: '', basePrice: '', error: '' }; render(); $('#np-name').focus(); break;
@@ -547,7 +631,7 @@ function bind(e) {
   setPath(path, t.value);
   if (path === 'prodQuery') { render(); return; }      // the product list filters as you type
   // Typing in a form hides that form's old message.
-  const forms = [['shipping.', state.shipping, '.ship-form .err'], ['addForm.', state.addForm, '#np-err'], ['manage.variant.', state.manage && state.manage.variant, '#nv-err']];
+  const forms = [['shipping.', state.shipping, '.ship-form .err'], ['addForm.', state.addForm, '#np-err'], ['manage.variant.', state.manage && state.manage.variant, '#nv-err'], ['loginForm.', state.loginForm, '#al-err']];
   forms.forEach(([prefix, f, sel]) => {
     if (path.startsWith(prefix) && f && f.error) { f.error = ''; const err = $(sel); if (err) err.remove(); }
   });
@@ -560,12 +644,12 @@ document.addEventListener('keydown', e => {
   if (e.key !== 'Enter' || t.tagName !== 'INPUT' || !t.id) return;
   const b = t.id === 'tracking' ? $('[data-act="ship"]') : t.id.startsWith('chg-') ? t.closest('.stock-change').querySelector('[data-act="stock"]')
     : t.id.startsWith('nv-') ? $('[data-act="add-variant"]') : t.id.startsWith('np-') ? $('[data-act="add-product"]')
-    : t.id === 'thr' ? $('[data-act="low-update"]') : null;
+    : t.id === 'thr' ? $('[data-act="low-update"]') : t.id.startsWith('al-') ? $('[data-act="login"]') : null;
   if (b) { e.preventDefault(); b.click(); }
 });
 
 render();
-loadOrders();
+start();
 })();
 </script>
 </body>
