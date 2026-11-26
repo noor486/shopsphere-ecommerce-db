@@ -238,3 +238,30 @@ footer{max-width:1200px;margin:0 auto;padding:0 clamp(14px,3vw,32px) 24px;color:
   .drawer,.drawer.left{animation:none}
   #toast,.tip,.menu-list .parent svg{transition:none}
 }
+
+/* ===== admin pages (admin.html) ===== */
+body.admin{padding-bottom:32px}
+.admin .logo small{font:600 15px var(--body);opacity:.75;margin-left:6px}
+.admin .shop-link{color:#fff;font-weight:600;white-space:nowrap}
+.tabs{display:flex;gap:6px;flex-wrap:wrap;background:var(--ink);padding:0 clamp(12px,3vw,32px) 14px}
+.tab{background:transparent;color:#CFE0DE;border:1px solid #4A6F75;border-radius:999px;padding:7px 16px;font-weight:600}
+.tab[aria-current="page"]{background:#fff;color:var(--ink);border-color:#fff}
+.admin-note{margin:0 0 16px;color:var(--ink-soft);font-size:15px}
+.filters-bar{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 16px}
+.filter{background:#fff;color:var(--ink);border:1px solid var(--line);border-radius:999px;padding:5px 14px;font-weight:600}
+.filter[aria-pressed="true"]{background:var(--ink);color:#fff;border-color:var(--ink)}
+.filter span{opacity:.7;font-weight:400;margin-left:4px}
+.arow{background:#fff;border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin-bottom:12px}
+.arow-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 12px}
+.arow-head h2{font-size:19px}
+.arow-head .total{margin-left:auto;font:800 18px var(--display)}
+.arow-meta{margin:4px 0 0;color:var(--ink-soft);font-size:15px}
+.arow-status{display:flex;flex-wrap:wrap;gap:4px 18px;margin-top:8px;font-size:15px}
+.arow .actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:12px}
+.arow .actions .btn{padding:6px 12px}
+.arow .ship-form{display:flex;flex-wrap:wrap;align-items:flex-end;gap:10px;margin-top:12px;padding-top:12px;border-top:1px solid var(--line)}
+.arow .ship-form .field{margin:0;flex:1 1 180px}
+.arow table{width:100%;border-collapse:collapse;margin-top:10px;font-size:15px}
+.arow th{text-align:left;font-weight:600;color:var(--ink-soft);font-size:14px;padding:4px 6px 4px 0}
+.arow td{padding:6px 6px 6px 0;border-top:1px solid var(--line)}
+.arow td.r,.arow th.r{text-align:right}
