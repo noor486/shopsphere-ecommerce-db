@@ -298,6 +298,13 @@ body.admin{padding-bottom:32px}
 .stock-change input{width:80px;border:1px solid var(--line);border-radius:8px;padding:5px 8px}
 .stock-change .btn{padding:5px 10px}
 .ptable .sub{display:none;font-size:13px;color:var(--ink-soft);font-weight:400}
+/* editing a product, a variant or a category */
+.panel-head{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:flex-start;gap:8px 14px;margin:8px 0 10px}
+.edit-box{background:#fff;border:1px solid var(--line);border-radius:8px;padding:12px 14px;margin:10px 0}
+.edit-box .row{margin-top:8px}
+.stock-change .link{margin-left:4px}
+.ptable td.sub-cat{padding-left:30px}
+.stock-change .wide-input{width:220px;max-width:100%}
 
 /* ----- reports ----- */
 /* One series per chart, so one bar colour: a teal from the shop's family, checked with the
