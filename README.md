@@ -10,7 +10,7 @@ The three folders `frontend/`, `backend/` and `sql/` are the proposal's three ti
 
 | Path | What it is |
 |---|---|
-| [`docs/`](docs) | Project proposal and the normalized schema diagram |
+| [`docs/`](docs) | Project proposal, the [final report](docs/ShopSphere_Final_Report.docx) and the normalized schema diagram |
 | [`sql/schema.sql`](sql/schema.sql) | Builds the whole database: 17 tables (normalized to BCNF), indexes, sample data, plus the 2 views and 2 stored procedures |
 | [`queries/functionalities.sql`](queries/functionalities.sql) | 26 functionalities (queries) that run on the database |
 | [`backend/`](backend) | REST API in Node.js and Express that connects to the database ([endpoints and details](backend/README.md)) |
@@ -28,7 +28,7 @@ The three folders `frontend/`, `backend/` and `sql/` are the proposal's three ti
 - CHECK, UNIQUE and FOREIGN KEY constraints enforce the rules. For example, stock can't go negative, a rating must be from 1 to 5, an email can be registered only once, and a customer can review a product only once.
 - 16 indexes on foreign key and searched columns speed up joins and lookups.
 
-**Sample data:** 79 products, 115 variants, 15 customers, 1 admin, 14 orders (at least one in every status: Pending, Processing, Shipped, Delivered, Cancelled), and their payments, shipments and 13 reviews. Every review is by a customer whose order with that product was delivered.
+**Sample data:** 79 products, 115 variants, 16 customers, 1 admin, 14 orders (at least one in every status: Pending, Processing, Shipped, Delivered, Cancelled), and their payments, shipments and 13 reviews. Every review is by a customer whose order with that product was delivered.
 
 ## Functionalities
 
@@ -53,7 +53,7 @@ These are at the end of `sql/schema.sql`, each with a description and example ca
 
 ## API
 
-The backend exposes the database as a REST API: catalog and search, customer accounts and addresses, cart and wishlist, checkout, order history and cancelling, reviews, and the admin side (orders, payments, shipping, products, stock, sales reports). Requests that change several tables at once run in transactions.
+The backend exposes the database as a REST API: catalog and search, customer accounts and addresses, cart and wishlist, checkout, order history and cancelling, reviews, and the admin side (orders, payments, shipping, adding and editing products and categories, stock, sales reports). Requests that change several tables at once run in transactions.
 
 The admin endpoints need an admin login: `POST /api/admin/login` returns a token, and every other `/api/admin` request without a valid token is refused with 401.
 
@@ -67,8 +67,9 @@ Both pages read from and save to the database through the API.
 
 **The admin pages** (<http://localhost:3000/admin.html>, or the **Admin** link in the shop's header), after logging in as an admin:
 
-- **Orders:** every order with its payment and shipment; mark a payment paid or failed, ship (carrier and tracking number), mark delivered, cancel.
-- **Products and stock:** search the products, add a product, add a variant, restock or correct stock.
+- **Orders:** every order with its payment and shipment; mark a payment paid or failed, ship (carrier and tracking number; only once paid, except cash on delivery), mark delivered, cancel.
+- **Products and stock:** search the products; add or edit a product (name, description, category, seller, price); add or edit a variant (SKU, size, colour, price); restock or correct stock.
+- **Categories:** add a main category or a subcategory, and rename categories. The shop's menu shows the changes straight away.
 - **Reports:** revenue, orders, average order and units sold; revenue by month; top products; sales by category; customer spending; low stock.
 
 ## Running it
@@ -94,4 +95,4 @@ You need SQL Server (Express is enough), SSMS and Node.js.
 
 ## Out of scope
 
-Following the proposal: real payment gateways, production-grade security (password hashing, signed tokens; passwords are stored as plain text and admin tokens live in the API's memory) and large-scale performance tuning. Product pictures are not included yet; products show a coloured tile with their initials.
+Following the proposal: real payment gateways, production-grade security (password hashing, signed tokens; passwords are stored as plain text and admin tokens live in the API's memory) and large-scale performance tuning. Product pictures are also left out: the database stores each product's image URLs (`ProductImage`), but the shop shows a coloured tile with the product's initials instead of a photo.
