@@ -276,7 +276,8 @@ INSERT INTO Customer (Name, Email, Password, Phone) VALUES
 ('Kinza Yousaf', 'kinza.yousaf@example.com', 'hashed_pw_012', '03071234567'),
 ('Rehan Qureshi', 'rehan.qureshi@example.com', 'hashed_pw_013', '03349876543'),
 ('Sana Riaz', 'sana.riaz@example.com', 'hashed_pw_014', '03121234567'),
-('Omar Farooq', 'omar.farooq@example.com', 'hashed_pw_015', '03429876543');
+('Omar Farooq', 'omar.farooq@example.com', 'hashed_pw_015', '03429876543'),
+('noor', 'noor@gmail.com', 'hashed_pw_016', NULL);   -- first signed up through the shop, kept as sample data
 
 -- ===== Sellers =====
 INSERT INTO Seller (StoreName, Email, Rating) VALUES
