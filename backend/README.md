@@ -19,7 +19,7 @@ REST API for the ShopSphere database, built with Node.js, Express and SQL Server
    | URL | What opens |
    |---|---|
    | <http://localhost:3000> | The shop (`frontend/index.html`) |
-   | <http://localhost:3000/admin.html> | The admin pages: orders, products and stock, reports (`frontend/admin.html`) |
+   | <http://localhost:3000/admin.html> | The admin pages: orders, products and stock, categories, reports (`frontend/admin.html`) |
    | <http://localhost:3000/api/health> | A quick check: the database name and the number of products |
    | <http://localhost:3000/api> | A short list of API URLs to try |
 
@@ -40,7 +40,7 @@ Request and response bodies are JSON. Errors come back as `{ "error": "message" 
 | 400 | Bad input, or a business rule was broken (e.g. not enough stock) |
 | 401 | Wrong email or password, or an admin request without a valid admin token |
 | 404 | Not found |
-| 409 | Duplicate (e.g. email already registered, product already reviewed) |
+| 409 | Duplicate (e.g. email already registered, product already reviewed, SKU already used) |
 
 ### Catalog
 
@@ -102,10 +102,14 @@ Without a valid token the API answers **401** and changes nothing. Tokens last 8
 | POST | `/api/admin/logout` | | Forget the token |
 | GET | `/api/admin/orders?status=` | | Every order (**vw_OrderSummary**), newest first, with its latest `PaymentID`. `status` (e.g. `Pending`) is optional |
 | POST | `/api/admin/products` | `name, description, categoryId, sellerId, basePrice` | Add a product |
+| PATCH | `/api/admin/products/:id` | any of `name, description, categoryId, sellerId, basePrice` | Edit a product. Only the fields sent change; send an empty `description` to clear it |
 | POST | `/api/admin/products/:id/variants` | `sku, size, color, price, stockQty` | Add a size/colour variant |
+| PATCH | `/api/admin/variants/:id` | any of `sku, size, color, price` | Edit a variant. A SKU used by another variant gives 409. Old orders keep the price they were sold at (`OrderItem.UnitPrice`) |
 | PATCH | `/api/admin/variants/:id/stock` | `change` | Restock (`25`) or correct (`-3`) stock |
+| POST | `/api/admin/categories` | `name, parentCategoryId` | Add a main category (no parent) or a subcategory. A subcategory must sit under a main category (two levels, like the shop's menu); the same name twice in one place gives 409 |
+| PATCH | `/api/admin/categories/:id` | `name` | Rename a category (same 409 rule) |
 | PATCH | `/api/admin/payments/:id` | `status` | Pending → Completed or Failed; Completed → Refunded. Completing a payment moves a Pending order to Processing |
-| PATCH | `/api/admin/orders/:id/shipment` | `status, carrier, trackingNumber` | Mark as `Shipped` or `Delivered`; the order status follows |
+| PATCH | `/api/admin/orders/:id/shipment` | `status, carrier, trackingNumber` | Mark as `Shipped` or `Delivered`; the order status follows. An order ships only once paid (cash on delivery may ship unpaid), and only a shipped order can be delivered |
 | GET | `/api/admin/reports/top-products` | | Units sold per product |
 | GET | `/api/admin/reports/customer-spending` | | Total spent per customer |
 | GET | `/api/admin/reports/low-stock?threshold=10` | | Variants below the threshold |
@@ -139,7 +143,7 @@ Every request that changes more than one table runs inside a single transaction 
 | Update a payment | Payment status, plus the order moving to Processing |
 | Update a shipment | Shipment status and dates, plus the order status |
 
-Requests that change only one row or table (register, add an address, restock, wishlist) don't need one, because a single statement already succeeds or fails as a whole. Add to cart (`sp_AddToCart`) may create an empty cart before adding the line; if the line then failed, an empty cart is a normal state, so it doesn't need one either.
+Requests that change only one row or table (register, add an address, restock, edit a product, variant or category, wishlist) don't need one, because a single statement already succeeds or fails as a whole. Add to cart (`sp_AddToCart`) may create an empty cart before adding the line; if the line then failed, an empty cart is a normal state, so it doesn't need one either.
 
 ## Not done yet (on purpose)
 
