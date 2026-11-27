@@ -230,7 +230,7 @@ ORDER BY Revenue DESC;
 -- Functionality 21: Register a new customer
 -- Keywords: INSERT
 INSERT INTO Customer (Name, Email, Password, Phone)
-VALUES ('Maryam Aslam', 'maryam.aslam@example.com', 'hashed_pw_016', '03111234567');
+VALUES ('Maryam Aslam', 'maryam.aslam@example.com', 'hashed_pw_017', '03111234567');
 
 -- Functionality 22: Save a shipping address for the new customer
 -- Keywords: INSERT, nested query
