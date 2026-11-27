@@ -97,6 +97,118 @@ router.post('/products/:id/variants', async (req, res) => {
   res.status(201).json(variant);
 });
 
+// Was this field sent in the request body? (Lets a field be cleared with null or "".)
+const has = (body, field) => Object.prototype.hasOwnProperty.call(body, field);
+const blankToNull = v => (v === '' || v === undefined ? null : v);
+
+// PATCH /api/admin/products/:id
+// body: any of { name, description, categoryId, sellerId, basePrice }
+// Only the fields sent are changed. Old orders keep their prices (OrderItem.UnitPrice).
+router.patch('/products/:id', async (req, res) => {
+  const id = toId(req.params.id), b = req.body;
+  if (!['name', 'description', 'categoryId', 'sellerId', 'basePrice'].some(f => has(b, f))) {
+    throw new HttpError(400, 'Nothing to change.');
+  }
+  if (has(b, 'name') && !String(b.name || '').trim()) throw new HttpError(400, 'The name cannot be empty.');
+
+  const [product] = await query(
+    `UPDATE Product SET
+       Name        = COALESCE(@name, Name),
+       Description = CASE WHEN @setDescription = 1 THEN @description ELSE Description END,
+       CategoryID  = COALESCE(@categoryId, CategoryID),
+       SellerID    = COALESCE(@sellerId, SellerID),
+       BasePrice   = COALESCE(@basePrice, BasePrice)
+     OUTPUT INSERTED.*
+     WHERE ProductID = @id`,
+    {
+      id,
+      name: has(b, 'name') ? String(b.name).trim() : null,
+      setDescription: has(b, 'description') ? 1 : 0, description: blankToNull(b.description),
+      categoryId: has(b, 'categoryId') ? toId(b.categoryId, 'categoryId') : null,
+      sellerId: has(b, 'sellerId') ? toId(b.sellerId, 'sellerId') : null,
+      basePrice: has(b, 'basePrice') ? toAmount(b.basePrice, 'basePrice') : null,
+    });
+  res.json(found(product, 'Product'));
+});
+
+// PATCH /api/admin/variants/:id   body: any of { sku, size, color, price }
+// Stock is changed separately (PATCH /variants/:id/stock). SKU is UNIQUE, so a
+// code already used by another variant is refused with 409.
+router.patch('/variants/:id', async (req, res) => {
+  const id = toId(req.params.id), b = req.body;
+  if (!['sku', 'size', 'color', 'price'].some(f => has(b, f))) throw new HttpError(400, 'Nothing to change.');
+  if (has(b, 'sku') && !String(b.sku || '').trim()) throw new HttpError(400, 'The SKU cannot be empty.');
+
+  const [variant] = await query(
+    `UPDATE ProductVariant SET
+       SKU   = COALESCE(@sku, SKU),
+       Size  = CASE WHEN @setSize = 1 THEN @size ELSE Size END,
+       Color = CASE WHEN @setColor = 1 THEN @color ELSE Color END,
+       Price = COALESCE(@price, Price)
+     OUTPUT INSERTED.VariantID, INSERTED.ProductID, INSERTED.SKU, INSERTED.Size, INSERTED.Color, INSERTED.Price, INSERTED.StockQty
+     WHERE VariantID = @id`,
+    {
+      id,
+      sku: has(b, 'sku') ? String(b.sku).trim() : null,
+      setSize: has(b, 'size') ? 1 : 0, size: blankToNull(b.size),
+      setColor: has(b, 'color') ? 1 : 0, color: blankToNull(b.color),
+      price: has(b, 'price') ? toAmount(b.price, 'price') : null,
+    });
+  res.json(found(variant, 'Variant'));
+});
+
+// ===================== Categories =====================
+// Categories form two levels: main categories (no parent) and their subcategories.
+// The shop's menu shows exactly these two levels, so a subcategory can only be
+// placed under a main category. Two categories in the same place cannot share a name.
+
+async function nameTaken(name, parentId, exceptId) {
+  const [row] = await query(
+    `SELECT TOP 1 CategoryID FROM Category
+     WHERE Name = @name
+       AND (ParentCategoryID = @parentId OR (ParentCategoryID IS NULL AND @parentId IS NULL))
+       AND CategoryID <> @exceptId`,
+    { name, parentId, exceptId: exceptId || 0 });
+  return !!row;
+}
+
+// POST /api/admin/categories   body: { name, parentCategoryId (optional) }
+router.post('/categories', async (req, res) => {
+  const name = String(req.body.name || '').trim();
+  if (!name) throw new HttpError(400, 'The name cannot be empty.');
+  const parentId = req.body.parentCategoryId ? toId(req.body.parentCategoryId, 'parentCategoryId') : null;
+
+  if (parentId) {
+    const [parent] = await query('SELECT ParentCategoryID FROM Category WHERE CategoryID = @parentId', { parentId });
+    found(parent, 'Parent category');
+    if (parent.ParentCategoryID !== null) {
+      throw new HttpError(400, 'A subcategory can only be placed under a main category.');
+    }
+  }
+  if (await nameTaken(name, parentId)) throw new HttpError(409, 'There is already a category with this name here.');
+
+  const [category] = await query(
+    'INSERT INTO Category (Name, ParentCategoryID) OUTPUT INSERTED.* VALUES (@name, @parentId)',
+    { name, parentId });
+  res.status(201).json(category);
+});
+
+// PATCH /api/admin/categories/:id   body: { name }
+router.patch('/categories/:id', async (req, res) => {
+  const id = toId(req.params.id);
+  const name = String(req.body.name || '').trim();
+  if (!name) throw new HttpError(400, 'The name cannot be empty.');
+
+  const [current] = await query('SELECT ParentCategoryID FROM Category WHERE CategoryID = @id', { id });
+  found(current, 'Category');
+  if (await nameTaken(name, current.ParentCategoryID, id)) {
+    throw new HttpError(409, 'There is already a category with this name here.');
+  }
+
+  const [category] = await query('UPDATE Category SET Name = @name OUTPUT INSERTED.* WHERE CategoryID = @id', { id, name });
+  res.json(category);
+});
+
 // PATCH /api/admin/variants/:id/stock   body: { change }
 // Add stock after a delivery (change: 25) or correct it (change: -3).
 // Stock can never go below zero (CHECK constraint on StockQty).
