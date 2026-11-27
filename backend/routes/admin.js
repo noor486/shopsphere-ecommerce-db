@@ -179,6 +179,11 @@ router.patch('/payments/:id', async (req, res) => {
 // body: { status: 'Shipped' | 'Delivered', carrier, trackingNumber }
 // Updates the shipment and keeps the order status in step with it.
 // Both updates run in one transaction.
+// The order must be in the right state:
+//   Shipped   - only a Pending or Processing order, and only once it is paid
+//               (latest payment Completed), except cash on delivery, which
+//               ships first and is paid on arrival.
+//   Delivered - only an order that has been Shipped.
 router.patch('/orders/:id/shipment', async (req, res) => {
   const id = toId(req.params.id);
   const { status, carrier, trackingNumber } = req.body;
@@ -186,9 +191,28 @@ router.patch('/orders/:id/shipment', async (req, res) => {
     throw new HttpError(400, "status must be 'Shipped' or 'Delivered'.");
   }
 
-  const [order] = await query('SELECT Status FROM [Order] WHERE OrderID = @id', { id });
+  // The order, with its latest payment (an order can have several attempts).
+  const [order] = await query(
+    `SELECT o.Status, p.Method AS PaymentMethod, p.Status AS PaymentStatus
+     FROM [Order] o
+     LEFT JOIN Payment p ON p.PaymentID = (SELECT MAX(PaymentID) FROM Payment WHERE OrderID = o.OrderID)
+     WHERE o.OrderID = @id`, { id });
   found(order, 'Order');
   if (order.Status === 'Cancelled') throw new HttpError(400, 'This order was cancelled.');
+
+  if (status === 'Shipped') {
+    if (!['Pending', 'Processing'].includes(order.Status)) {
+      throw new HttpError(400, `A ${order.Status.toLowerCase()} order cannot be shipped again.`);
+    }
+    const paid = order.PaymentStatus === 'Completed';
+    const cashOnDelivery = order.PaymentMethod === 'Cash on Delivery' && order.PaymentStatus === 'Pending';
+    if (!paid && !cashOnDelivery) {
+      throw new HttpError(400, 'This order cannot ship until it is paid. Only cash-on-delivery orders ship before payment.');
+    }
+  }
+  if (status === 'Delivered' && order.Status !== 'Shipped') {
+    throw new HttpError(400, 'Only a shipped order can be marked as delivered.');
+  }
 
   await query(
     `BEGIN TRY
