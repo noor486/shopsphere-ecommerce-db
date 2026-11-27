@@ -17,6 +17,7 @@
 <nav class="tabs" aria-label="Admin sections" hidden>
   <button class="tab" data-act="tab" data-tab="orders">Orders</button>
   <button class="tab" data-act="tab" data-tab="products">Products and stock</button>
+  <button class="tab" data-act="tab" data-tab="categories">Categories</button>
   <button class="tab" data-act="tab" data-tab="reports">Reports</button>
 </nav>
 <main id="main"></main>
@@ -43,6 +44,10 @@
       POST  /api/admin/products                add a product
       POST  /api/admin/products/:id/variants   add a variant (size, colour, SKU, price, stock)
       PATCH /api/admin/variants/:id/stock      restock (+25) or correct (-3) a variant's stock
+      PATCH /api/admin/products/:id            edit a product (name, description, category, seller, base price)
+      PATCH /api/admin/variants/:id            edit a variant (SKU, size, colour, price)
+      POST  /api/admin/categories              add a main category or a subcategory
+      PATCH /api/admin/categories/:id          rename a category
       GET   /api/admin/reports/...             the five sales reports (the proposal's sample queries):
             top-products, customer-spending, monthly-revenue, category-performance, low-stock?threshold=
   The payment and shipment updates also run in transactions in the API, so the order's
@@ -73,7 +78,10 @@ const state = {
   products: [], cats: [], sellers: [], prodLoaded: false, prodError: '',
   prodQuery: '',                  // the search box above the product list
   addForm: null,                  // the add-product form: { name, description, categoryId, sellerId, basePrice, error }
-  manage: null,                   // the open product: { pid, detail, change: { VariantID: '25' }, stockError, variant: {...} }
+  manage: null,                   // the open product: { pid, detail, change: { VariantID: '25' }, stockError, variant: {...}, edit, editVariant }
+  // categories tab
+  catForm: { name: '', parentId: '', error: '' },   // the add-category form
+  catRename: null,                // the category being renamed: { id, name, error }
   // reports tab
   reports: null, repError: '',    // { top, spend, months, cats, low } from the five report endpoints
   threshold: '10',                // the low-stock report's "fewer than" number
@@ -188,16 +196,24 @@ const priceRange = p => p.MinPrice == null ? money(p.BasePrice) + ' <span class=
   : Number(p.MinPrice) === Number(p.MaxPrice) ? money(p.MinPrice) : money(p.MinPrice) + ' – ' + money(p.MaxPrice);
 const field = (id, label, bind, value, type, extra) => '<div class="field' + (extra || '') + '"><label for="' + id + '"><span>' + label + '</span></label><input id="' + id + '" type="' + (type || 'text') + '" data-bind="' + bind + '" value="' + esc(value) + '"></div>';
 
+// Drop-down lists of categories ("Electronics / Laptops") and sellers, used by the add and edit forms.
+function categorySelect(id, bind, selected) {
+  const cats = state.cats.slice().sort((a, b) => catLabel(a.CategoryID).localeCompare(catLabel(b.CategoryID)));
+  return '<div class="field"><label for="' + id + '"><span>Category</span></label><select id="' + id + '" data-bind="' + bind + '"><option value="">Choose a category</option>' +
+    cats.map(c => '<option value="' + c.CategoryID + '"' + (String(selected) === String(c.CategoryID) ? ' selected' : '') + '>' + esc(catLabel(c.CategoryID)) + '</option>').join('') + '</select></div>';
+}
+function sellerSelect(id, bind, selected) {
+  return '<div class="field"><label for="' + id + '"><span>Seller</span></label><select id="' + id + '" data-bind="' + bind + '"><option value="">Choose a seller</option>' +
+    state.sellers.map(s => '<option value="' + s.SellerID + '"' + (String(selected) === String(s.SellerID) ? ' selected' : '') + '>' + esc(s.StoreName) + '</option>').join('') + '</select></div>';
+}
+
 function addProductForm() {
   const f = state.addForm;
-  const cats = state.cats.slice().sort((a, b) => catLabel(a.CategoryID).localeCompare(catLabel(b.CategoryID)));
   return '<section class="form-card"><h2>Add a product</h2><p class="muted">After adding it, add its first variant (size, colour, SKU, price and stock) so customers can buy it.</p>' +
     '<div class="form-grid">' +
       field('np-name', 'Name', 'addForm.name', f.name) +
-      '<div class="field"><label for="np-cat"><span>Category</span></label><select id="np-cat" data-bind="addForm.categoryId"><option value="">Choose a category</option>' +
-        cats.map(c => '<option value="' + c.CategoryID + '"' + (String(f.categoryId) === String(c.CategoryID) ? ' selected' : '') + '>' + esc(catLabel(c.CategoryID)) + '</option>').join('') + '</select></div>' +
-      '<div class="field"><label for="np-seller"><span>Seller</span></label><select id="np-seller" data-bind="addForm.sellerId"><option value="">Choose a seller</option>' +
-        state.sellers.map(s => '<option value="' + s.SellerID + '"' + (String(f.sellerId) === String(s.SellerID) ? ' selected' : '') + '>' + esc(s.StoreName) + '</option>').join('') + '</select></div>' +
+      categorySelect('np-cat', 'addForm.categoryId', f.categoryId) +
+      sellerSelect('np-seller', 'addForm.sellerId', f.sellerId) +
       field('np-price', 'Base price (Rs)', 'addForm.basePrice', f.basePrice, 'number') +
       '<div class="field wide"><label for="np-desc"><span>Description (optional)</span></label><textarea id="np-desc" rows="2" data-bind="addForm.description">' + esc(f.description) + '</textarea></div>' +
     '</div>' +
@@ -205,7 +221,38 @@ function addProductForm() {
     '<div class="row"><button class="btn primary" data-act="add-product">Add product</button><button class="btn" data-act="add-cancel">Cancel</button></div></section>';
 }
 
-// The open product: its variants with a stock box each, and the add-variant form.
+// The open product's details, or the form to edit them (PATCH /api/admin/products/:id).
+function productDetails(p) {
+  const m = state.manage, d = m.detail, e = m.edit;
+  if (!e) {
+    return '<div class="panel-head"><div><b>Details</b> <span class="muted">' + esc(catLabel(d.CategoryID)) + ' · ' + esc(d.SellerName) + ' · base price ' + money(d.BasePrice) + '</span>' +
+      (d.Description ? '<br><span class="muted">' + esc(d.Description) + '</span>' : '') + '</div>' +
+      '<button class="btn" data-act="edit-product" data-id="' + p.ProductID + '">Edit details</button></div>';
+  }
+  return '<div class="edit-box"><b>Edit details</b><div class="form-grid">' +
+      field('ep-name', 'Name', 'manage.edit.name', e.name) +
+      categorySelect('ep-cat', 'manage.edit.categoryId', e.categoryId) +
+      sellerSelect('ep-seller', 'manage.edit.sellerId', e.sellerId) +
+      field('ep-price', 'Base price (Rs)', 'manage.edit.basePrice', e.basePrice, 'number') +
+      '<div class="field wide"><label for="ep-desc"><span>Description (optional)</span></label><textarea id="ep-desc" rows="2" data-bind="manage.edit.description">' + esc(e.description) + '</textarea></div>' +
+    '</div>' +
+    (e.error ? '<p class="err" id="ep-err">' + esc(e.error) + '</p>' : '') +
+    '<div class="row"><button class="btn primary" data-act="save-product" data-id="' + p.ProductID + '">Save details</button><button class="btn" data-act="edit-product-cancel">Cancel</button></div></div>';
+}
+// The form to edit one variant (PATCH /api/admin/variants/:id). Stock has its own box.
+function variantEditForm() {
+  const v = state.manage.editVariant;
+  if (!v) return '';
+  return '<div class="edit-box"><b>Edit variant ' + esc(v.original) + '</b><div class="form-grid">' +
+      field('ev-sku', 'SKU (unique code)', 'manage.editVariant.sku', v.sku) + field('ev-size', 'Size (optional)', 'manage.editVariant.size', v.size) +
+      field('ev-color', 'Colour (optional)', 'manage.editVariant.color', v.color) + field('ev-price', 'Price (Rs)', 'manage.editVariant.price', v.price, 'number') +
+    '</div>' +
+    (v.error ? '<p class="err" id="ev-err">' + esc(v.error) + '</p>' : '') +
+    '<p class="muted">Changing the price does not change past orders: each order line keeps the price that was paid.</p>' +
+    '<div class="row"><button class="btn primary" data-act="save-variant" data-id="' + v.vid + '">Save variant</button><button class="btn" data-act="edit-variant-cancel">Cancel</button></div></div>';
+}
+
+// The open product: its details, its variants with a stock box each, and the add-variant form.
 function managePanel(p) {
   const m = state.manage;
   if (!m.detail) return '<tr class="panel"><td colspan="7"><p class="loading" style="margin:16px 0">Loading variants…</p></td></tr>';
@@ -215,10 +262,11 @@ function managePanel(p) {
       vs.map(v => '<tr><td><b>' + esc(v.SKU) + '</b></td><td data-label="Size">' + esc(v.Size || '—') + '</td><td data-label="Colour">' + esc(v.Color || '—') + '</td><td class="r" data-label="Price">' + money(v.Price) + '</td>' +
         '<td class="r' + (v.StockQty < 10 ? ' low' : '') + '" data-label="Stock">' + v.StockQty + '</td>' +
         '<td><div class="stock-change"><input type="number" step="1" id="chg-' + v.VariantID + '" data-bind="manage.change.' + v.VariantID + '" value="' + esc(m.change[v.VariantID] || '') + '" placeholder="e.g. 25" aria-label="Stock change for ' + esc(v.SKU) + '">' +
-        '<button class="btn" data-act="stock" data-id="' + v.VariantID + '">Update</button></div></td></tr>').join('') + '</tbody></table>' :
+        '<button class="btn" data-act="stock" data-id="' + v.VariantID + '">Update</button>' +
+        '<button class="link" data-act="edit-variant" data-id="' + v.VariantID + '">Edit</button></div></td></tr>').join('') + '</tbody></table>' :
     '<p class="err" style="margin:10px 0">No variants yet, so customers cannot buy this product. Add the first one below.</p>';
-  return '<tr class="panel"><td colspan="7">' +
-    (m.stockError ? '<p class="err">' + esc(m.stockError) + '</p>' : '') + table +
+  return '<tr class="panel"><td colspan="7">' + productDetails(p) +
+    (m.stockError ? '<p class="err">' + esc(m.stockError) + '</p>' : '') + table + variantEditForm() +
     '<b>Add a variant</b>' +
     '<div class="form-grid">' +
       field('nv-sku', 'SKU (unique code)', 'manage.variant.sku', f.sku) + field('nv-size', 'Size (optional)', 'manage.variant.size', f.size) +
@@ -253,6 +301,37 @@ function productsTab() {
     (list.length ?
       '<div class="table-wrap"><table class="ptable"><thead><tr><th>Product</th><th class="c-cat">Category</th><th class="c-seller">Seller</th><th class="r">Price</th><th class="r c-var">Variants</th><th class="r">Stock</th><th></th></tr></thead><tbody>' + list.map(row).join('') + '</tbody></table></div>' :
       '<p class="muted">No products match.</p>');
+}
+
+// ---------- categories tab ----------
+// Two levels, as in the shop's menu: main categories and their subcategories.
+function categoriesTab() {
+  if (state.prodError) return '<div class="empty"><h2>Categories could not load</h2><p>' + esc(state.prodError) + '</p><button class="btn primary" data-act="retry-products">Try again</button></div>';
+  if (!state.prodLoaded) return '<p class="loading">Loading categories…</p>';
+  const byName = (a, b) => a.Name.localeCompare(b.Name);
+  const mains = state.cats.filter(c => c.ParentCategoryID === null).sort(byName);
+  const subsOf = id => state.cats.filter(c => c.ParentCategoryID === id).sort(byName);
+  const count = id => state.products.filter(p => p.CategoryID === id).length;
+  const r = state.catRename, f = state.catForm;
+  const nameCell = (c, sub) => r && r.id === c.CategoryID ?
+      '<div class="stock-change"><label class="sr" for="rc-name">New name</label><input id="rc-name" class="wide-input" data-bind="catRename.name" value="' + esc(r.name) + '">' +
+      '<button class="btn primary" data-act="rename-save" data-id="' + c.CategoryID + '">Save</button><button class="btn" data-act="rename-cancel">Cancel</button></div>' +
+      (r.error ? '<p class="err" id="rc-err">' + esc(r.error) + '</p>' : '') :
+    (sub ? '<span class="muted" aria-hidden="true">└ </span>' + esc(c.Name) : '<b>' + esc(c.Name) + '</b>');
+  const row = (c, sub) => '<tr data-cid="' + c.CategoryID + '"><td' + (sub ? ' class="sub-cat"' : '') + '>' + nameCell(c, sub) + '</td><td class="r">' + count(c.CategoryID) + '</td>' +
+    '<td>' + (r && r.id === c.CategoryID ? '' : '<button class="link" data-act="rename-open" data-id="' + c.CategoryID + '">Rename</button>') + '</td></tr>';
+  return '<div class="shop-head"><h1>Categories</h1></div>' +
+    '<p class="admin-note">' + mains.length + ' main categories and ' + (state.cats.length - mains.length) + ' subcategories, as in the shop\'s menu. A subcategory belongs to one main category; there is no third level.</p>' +
+    '<section class="form-card"><h2>Add a category</h2><div class="form-grid">' +
+      field('nc-name', 'Name', 'catForm.name', f.name) +
+      '<div class="field"><label for="nc-parent"><span>Where</span></label><select id="nc-parent" data-bind="catForm.parentId"><option value="">As a main category</option>' +
+        mains.map(m => '<option value="' + m.CategoryID + '"' + (String(f.parentId) === String(m.CategoryID) ? ' selected' : '') + '>Under ' + esc(m.Name) + '</option>').join('') + '</select></div>' +
+    '</div>' + (f.error ? '<p class="err" id="nc-err">' + esc(f.error) + '</p>' : '') +
+    '<button class="btn primary" data-act="add-category">Add category</button></section>' +
+    '<div class="table-wrap"><table class="ptable"><thead><tr><th>Category</th><th class="r">Products in it</th><th></th></tr></thead><tbody>' +
+      mains.map(m => row(m, false) + subsOf(m.CategoryID).map(s => row(s, true)).join('')).join('') +
+    '</tbody></table></div>' +
+    '<p class="muted" style="margin-top:10px">"Products in it" counts the products placed directly in that category; a product is usually placed in a subcategory.</p>';
 }
 
 // ---------- reports tab ----------
@@ -379,6 +458,7 @@ function render() {
   const tabs = {
     orders: ordersTab,
     products: productsTab,
+    categories: categoriesTab,
     reports: reportsTab
   };
   hideTip();
@@ -458,7 +538,7 @@ async function cancel(orderId) {
 // ---------- products: actions ----------
 const newVariant = () => ({ sku: '', size: '', color: '', price: '', stock: '0', error: '' });
 async function openManage(pid) {
-  state.manage = { pid: pid, detail: null, change: {}, stockError: '', variant: newVariant() };
+  state.manage = { pid: pid, detail: null, change: {}, stockError: '', variant: newVariant(), edit: null, editVariant: null };
   render();
   await loadManage();
 }
@@ -518,6 +598,75 @@ async function addVariant(pid) {
   await refreshProducts();
 }
 
+// ---------- editing a product or a variant ----------
+const priceText = n => String(Number(n));
+function openEditProduct() {
+  const d = state.manage.detail;
+  state.manage.editVariant = null;
+  state.manage.edit = { name: d.ProductName, description: d.Description || '', categoryId: String(d.CategoryID),
+    sellerId: String(d.SellerID), basePrice: priceText(d.BasePrice), error: '' };
+  render(); $('#ep-name').focus();
+}
+// PATCH /api/admin/products/:id
+async function saveProduct(pid) {
+  const e = state.manage.edit, price = Number(e.basePrice);
+  if (!e.name.trim() || !e.categoryId || !e.sellerId || e.basePrice === '') { e.error = 'Fill in the name, category, seller and base price.'; render(); return; }
+  if (!Number.isFinite(price) || price < 0) { e.error = 'The base price must be a number, 0 or more.'; render(); return; }
+  try {
+    await api.patch('/admin/products/' + pid, { name: e.name.trim(), description: e.description.trim(),
+      categoryId: Number(e.categoryId), sellerId: Number(e.sellerId), basePrice: price });
+  } catch (err) { e.error = err.message; render(); return; }
+  state.manage.edit = null; toast('Product saved');
+  await refreshProducts();
+}
+function openEditVariant(vid) {
+  const v = state.manage.detail.variants.find(x => x.VariantID === vid);
+  state.manage.edit = null;
+  state.manage.editVariant = { vid: vid, original: v.SKU, sku: v.SKU, size: v.Size || '', color: v.Color || '', price: priceText(v.Price), error: '' };
+  render(); $('#ev-sku').focus();
+}
+// PATCH /api/admin/variants/:id. SKU is UNIQUE, so a code used by another variant comes back as 409.
+async function saveVariant(vid) {
+  const v = state.manage.editVariant, price = Number(v.price);
+  state.manage.stockError = '';
+  if (!v.sku.trim() || v.price === '') { v.error = 'Fill in the SKU and the price.'; render(); return; }
+  if (!Number.isFinite(price) || price < 0) { v.error = 'The price must be a number, 0 or more.'; render(); return; }
+  try {
+    await api.patch('/admin/variants/' + vid, { sku: v.sku.trim(), size: v.size.trim(), color: v.color.trim(), price: price });
+  } catch (e) {
+    v.error = e.status === 409 ? 'SKU ' + v.sku.trim() + ' is already used by another variant (SKU is UNIQUE).' : e.message; render(); return;
+  }
+  state.manage.editVariant = null; toast('Variant ' + v.sku.trim() + ' saved');
+  await refreshProducts();
+}
+
+// ---------- categories ----------
+const newCatForm = () => ({ name: '', parentId: '', error: '' });
+// POST /api/admin/categories
+async function addCategory() {
+  const f = state.catForm, name = f.name.trim();
+  if (!name) { f.error = 'Type a name for the category.'; render(); return; }
+  let c;
+  try { c = await api.post('/admin/categories', { name: name, parentCategoryId: f.parentId ? Number(f.parentId) : null }); }
+  catch (e) { f.error = e.message; render(); return; }
+  state.catForm = newCatForm(); toast('Category "' + c.Name + '" added');
+  await loadProducts();
+}
+function openRename(id) {
+  const c = state.cats.find(x => x.CategoryID === id);
+  state.catRename = { id: id, name: c.Name, error: '' };
+  render(); $('#rc-name').focus(); $('#rc-name').select();
+}
+// PATCH /api/admin/categories/:id
+async function renameCategory(id) {
+  const r = state.catRename, name = r.name.trim();
+  if (!name) { r.error = 'Type a name for the category.'; render(); return; }
+  try { await api.patch('/admin/categories/' + id, { name: name }); }
+  catch (e) { r.error = e.message; render(); return; }
+  state.catRename = null; toast('Category renamed to "' + name + '"');
+  await loadProducts();
+}
+
 // ---------- logging in and out ----------
 const newLogin = notice => ({ email: '', password: '', error: '', notice: notice || '', busy: false });
 function saveToken(token) {
@@ -527,7 +676,8 @@ function saveToken(token) {
 // Forget everything loaded while logged in, so the next admin starts clean.
 function clearData() {
   Object.assign(state, { tab: 'orders', orders: [], loaded: false, loadError: '', filter: '', items: {}, shipping: null, cancelAsk: null,
-    products: [], prodLoaded: false, prodError: '', prodQuery: '', addForm: null, manage: null, reports: null, repError: '' });
+    products: [], prodLoaded: false, prodError: '', prodQuery: '', addForm: null, manage: null, reports: null, repError: '',
+    catForm: newCatForm(), catRename: null });
 }
 // POST /api/admin/login -> { token, admin }
 async function doLogin() {
@@ -575,7 +725,7 @@ async function once(fn) {
   if (busy) return;
   busy = true;
   try { await fn(); }
-  catch (e) { toast(e.message); await (state.tab === 'products' ? loadProducts() : loadOrders()); }
+  catch (e) { toast(e.message); await (state.tab === 'orders' ? loadOrders() : state.tab === 'reports' ? loadReports() : loadProducts()); }
   finally { busy = false; }
 }
 
@@ -589,6 +739,7 @@ document.addEventListener('click', e => {
       if (!state.admin) break;                  // logged out: only the log-in screen
       state.tab = el.dataset.tab; render(); window.scrollTo(0, 0);
       if (state.tab === 'products' && !state.prodLoaded) loadProducts();
+      if (state.tab === 'categories') { state.catRename = null; loadProducts(); }   // fresh product counts
       if (state.tab === 'reports') loadReports();
       break;
     // reports tab
@@ -617,6 +768,18 @@ document.addEventListener('click', e => {
     case 'manage': if (state.manage && state.manage.pid === id) { state.manage = null; render(); } else openManage(id); break;
     case 'stock': once(() => changeStock(id)); break;
     case 'add-variant': once(() => addVariant(id)); break;
+    // editing a product or a variant
+    case 'edit-product': openEditProduct(); break;
+    case 'edit-product-cancel': state.manage.edit = null; render(); break;
+    case 'save-product': once(() => saveProduct(id)); break;
+    case 'edit-variant': openEditVariant(id); break;
+    case 'edit-variant-cancel': state.manage.editVariant = null; render(); break;
+    case 'save-variant': once(() => saveVariant(id)); break;
+    // categories tab
+    case 'add-category': once(addCategory); break;
+    case 'rename-open': openRename(id); break;
+    case 'rename-cancel': state.catRename = null; render(); break;
+    case 'rename-save': once(() => renameCategory(id)); break;
   }
 });
 // data-bind="addForm.name" means: keep state.addForm.name equal to what is typed in this box.
@@ -631,7 +794,9 @@ function bind(e) {
   setPath(path, t.value);
   if (path === 'prodQuery') { render(); return; }      // the product list filters as you type
   // Typing in a form hides that form's old message.
-  const forms = [['shipping.', state.shipping, '.ship-form .err'], ['addForm.', state.addForm, '#np-err'], ['manage.variant.', state.manage && state.manage.variant, '#nv-err'], ['loginForm.', state.loginForm, '#al-err']];
+  const forms = [['shipping.', state.shipping, '.ship-form .err'], ['addForm.', state.addForm, '#np-err'], ['manage.variant.', state.manage && state.manage.variant, '#nv-err'], ['loginForm.', state.loginForm, '#al-err'],
+    ['manage.edit.', state.manage && state.manage.edit, '#ep-err'], ['manage.editVariant.', state.manage && state.manage.editVariant, '#ev-err'],
+    ['catForm.', state.catForm, '#nc-err'], ['catRename.', state.catRename, '#rc-err']];
   forms.forEach(([prefix, f, sel]) => {
     if (path.startsWith(prefix) && f && f.error) { f.error = ''; const err = $(sel); if (err) err.remove(); }
   });
@@ -644,7 +809,9 @@ document.addEventListener('keydown', e => {
   if (e.key !== 'Enter' || t.tagName !== 'INPUT' || !t.id) return;
   const b = t.id === 'tracking' ? $('[data-act="ship"]') : t.id.startsWith('chg-') ? t.closest('.stock-change').querySelector('[data-act="stock"]')
     : t.id.startsWith('nv-') ? $('[data-act="add-variant"]') : t.id.startsWith('np-') ? $('[data-act="add-product"]')
-    : t.id === 'thr' ? $('[data-act="low-update"]') : t.id.startsWith('al-') ? $('[data-act="login"]') : null;
+    : t.id === 'thr' ? $('[data-act="low-update"]') : t.id.startsWith('al-') ? $('[data-act="login"]')
+    : t.id.startsWith('ep-') ? $('[data-act="save-product"]') : t.id.startsWith('ev-') ? $('[data-act="save-variant"]')
+    : t.id.startsWith('nc-') ? $('[data-act="add-category"]') : t.id === 'rc-name' ? $('[data-act="rename-save"]') : null;
   if (b) { e.preventDefault(); b.click(); }
 });
 
